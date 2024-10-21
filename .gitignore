@@ -2,4 +2,6 @@ build/
 dist/
 src/model/build/
 
+
+.idea/
 *.spec
