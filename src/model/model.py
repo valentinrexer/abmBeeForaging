@@ -2,7 +2,7 @@ import mesa
 import random
 
 from mesa.time import SimultaneousActivation
-from src.agents.agent import FlowerAgent, HoneyBeeAgent
+from src.model.agent import FlowerAgent, HoneyBeeAgent
 
 
 class BeeModel(mesa.Model):
@@ -53,11 +53,8 @@ class BeeModel(mesa.Model):
 
 
 
-
-values = [50, 200, 500, 2000, 5000, 50000]
-for f in range(10):
-    print(f)
-    print("")
+def __main__():
+    values = [50, 200, 500, 2000, 5000, 50000]
     for k in values:
         model = BeeModel(2000, 2000, 7500, 2500)
         for i in range(k):
@@ -65,4 +62,6 @@ for f in range(10):
 
         print(f'{k}: {model.hive_stock}')
 
-    print("")
+
+if __name__ == '__main__':
+    __main__()
