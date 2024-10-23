@@ -10,6 +10,9 @@ import random
 
 
 
+
+
+
 ### definition of global attributes ###
 
 #flower colors
@@ -22,7 +25,30 @@ class Color(Enum):
     WHITE = 6,
 
 
+#flower closed
+class Bloom(Enum):
+    OPEN = True,
+    CLOSED = False
+
+
+
+#bee type
+class BeeType(Enum):
+    EXPERIENCED_FORAGER = 1,
+    NEW_FORAGER = 2,
+
+
 #bee status
+class BeeStatus(Enum):
+    RESTING = 1,
+    CLUSTERING = 2,
+    DANCING = 3,
+    FLYING_OUT = 4,
+    RETURNING = 5,
+    LOADING_NECTAR = 6,
+    UNLOADING_NECTAR = 7,
+    SEARCHING_ADVERTISED_SOURCE = 8,
+
 
 
 
@@ -39,12 +65,13 @@ class Color(Enum):
         flower_stock (float) [optional]: nectar stock / energy? 
         color (Color) [optional]: color of the flower
 """
+
 class FlowerAgent(mesa.Agent):
-    def __init__(self, flower_id, bee_model, closed=False,  flower_stock = random.randint(0, 100) / 100, color=random.choice(list(Color))):
+    def __init__(self, flower_id, bee_model, bloom_state=Bloom.OPEN,  flower_stock = random.randint(0, 100) / 100, color=random.choice(list(Color))):
         super().__init__(flower_id, bee_model)
 
 
         #optional variables
-        self.closed = closed
+        self.bloom_state = bloom_state
         self.flower_stock = flower_stock
         self.color = color
