@@ -6,9 +6,8 @@ from enum import Enum
 import random
 
 #packages for data analysis
-
-
-
+import pandas as pd
+import numpy as np
 
 
 
@@ -60,18 +59,18 @@ class BeeStatus(Enum):
     Args:
         flower_id (int): unique id of the flower agent
         bee_model (mesa.Model): model where the agent is placed
+        sucrose_concentration (float): sucrose concentration in the flower
         
         closed (bool) [optional]: flower is closed
-        flower_stock (float) [optional]: nectar stock / energy? 
         color (Color) [optional]: color of the flower
 """
 
 class FlowerAgent(mesa.Agent):
-    def __init__(self, flower_id, bee_model, bloom_state=Bloom.OPEN,  flower_stock = random.randint(0, 100) / 100, color=random.choice(list(Color))):
+    def __init__(self, flower_id, bee_model, sucrose_concentration, bloom_state=Bloom.OPEN , color=random.choice(list(Color))):
         super().__init__(flower_id, bee_model)
 
+        self.sucrose_concentration = sucrose_concentration
 
         #optional variables
         self.bloom_state = bloom_state
-        self.flower_stock = flower_stock
         self.color = color
