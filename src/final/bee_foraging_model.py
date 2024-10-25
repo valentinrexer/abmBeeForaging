@@ -10,6 +10,19 @@ import pandas as pd
 import numpy as np
 
 
+### definition of fixed global variables ###
+
+RESTING_ENERGY_COST = 6.2 #mW
+UNLOADING_NECTAR_ENERGY_COST = 9.3 #mW
+FLYING_COST_UNLOADED = 37.0 #mW
+FLYING_COST_LOADED = 75 #mW
+FLYING_SPEED = 6.944 #m/s
+SEARCHING_SPEED = FLYING_SPEED / 3 #m/s
+MAX_SEARCH_TIME = 960 #s
+MAX_DANCE_ERROR = 50 #m
+
+NECTAR_REWARD = 353.8 #C
+
 
 
 ### definition of global attributes ###
@@ -52,7 +65,6 @@ class BeeStatus(Enum):
 
 
 # definition of the Flower Class
-#todo: adjust flower stock variable
 """
     Represents a single flower in the model 
     
@@ -74,3 +86,5 @@ class FlowerAgent(mesa.Agent):
         #optional variables
         self.bloom_state = bloom_state
         self.color = color
+
+
