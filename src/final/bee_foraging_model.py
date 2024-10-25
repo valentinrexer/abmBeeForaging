@@ -43,6 +43,7 @@ class Bloom(Enum):
     CLOSED = False
 
 
+#todo: will probably be replaced/removed later (experience status might be retrievable from days known variable)
 #bee forager experienced status
 class BeeForagerExperienceStatus(Enum):
     EXPERIENCED_FORAGER = 1,
