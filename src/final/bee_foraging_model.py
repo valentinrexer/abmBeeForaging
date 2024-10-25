@@ -43,11 +43,16 @@ class Bloom(Enum):
     CLOSED = False
 
 
-
-#bee type
-class BeeType(Enum):
+#bee forager experienced status
+class BeeForagerExperienceStatus(Enum):
     EXPERIENCED_FORAGER = 1,
     NEW_FORAGER = 2,
+
+
+#bee forager type
+class BeeForagerType(Enum):
+    PERSISTENT = 1,
+    RETICENT = 2,
 
 
 #bee status
