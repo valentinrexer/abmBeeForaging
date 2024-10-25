@@ -88,3 +88,8 @@ class FlowerAgent(mesa.Agent):
         self.color = color
 
 
+class ForagerBeeAgent(mesa.Agent):
+    def __init__(self, flower_id, bee_model):
+        super().__init__(flower_id, bee_model)
+
+
