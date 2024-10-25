@@ -88,8 +88,52 @@ class FlowerAgent(mesa.Agent):
         self.color = color
 
 
+
+
+
+
+
+
+"""
+
+    Represents a single forager bee in the model
+    
+    Args:
+        bee_id (int): unique id of the bee agent
+        bee_model (mesa.Model): model where the bee agent is placed
+        
+"""
 class ForagerBeeAgent(mesa.Agent):
-    def __init__(self, flower_id, bee_model):
-        super().__init__(flower_id, bee_model)
+    def __init__(self, bee_id, bee_model):
+        super().__init__(bee_id, bee_model)
 
 
+
+
+
+
+
+
+"""
+
+    Custom Grid to model the environment for the simulation
+    
+    Args:
+        size (int): size of the grid i.e. size x size
+        resolution (int): resolution of the grid (e.g. resolution=10 means 1m = 10 units size units in the model)
+    
+    Variables:
+        hive ( (int,int) ): position of the hive ==> bee agents are located here while they rest or unload, 
+                            located at the center of the grid
+                            
+        dance_floor ( (int,int) ): position of the dance floor ==> bee agents are located here while they cluster or dance
+                                   located at (hive_x+1, hive_y)
+"""
+
+
+class BeeGrid(mesa.space.MultiGrid):
+
+    def __init__(self, size, resolution):
+        super().__init__(size * resolution, size * resolution, False)
+        self.hive = (size * resolution // 2, size * resolution // 2)
+        self.dance_floor = (self.hive[0] + 1, self.hive[1])
