@@ -62,6 +62,14 @@ class BeeStatus(Enum):
     SEARCHING_ADVERTISED_SOURCE = 8,
 
 
+#foraging strategy
+class ForagingStrategy(Enum):
+    STRATEGY_1 = 1,
+    STRATEGY_10 = 2,
+    STRATEGY_100 = 3,
+    STRATEGY_40_60_80 = 4,
+
+
 
 
 # definition of the Flower Class
