@@ -11,6 +11,9 @@ import numpy as np
 
 
 ### definition of fixed global variables ###
+SUNRISE = 25,200 # tick when the sun rises
+SUNSET = 68,400 # tick when the sun sets
+TICKS_PER_DAY = 86,400 # amount of ticks at a full day
 
 RESTING_ENERGY_COST = 6.2 #mW
 UNLOADING_NECTAR_ENERGY_COST = 9.3 #mW
