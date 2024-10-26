@@ -96,12 +96,13 @@ class ForagingStrategy(Enum):
         bee_model (mesa.Model): model where the agent is placed
         sucrose_concentration (float): sucrose concentration in the flower
         
+        flower_range (float): 
         closed (bool) [optional]: flower is closed
         color (Color) [optional]: color of the flower
 """
 
 class FlowerAgent(mesa.Agent):
-    def __init__(self, flower_id, bee_model, sucrose_concentration, flower_range = 1, bloom_state=Bloom.OPEN , color=random.choice(list(Color))):
+    def __init__(self, flower_id, bee_model, sucrose_concentration, flower_range = 1.0, bloom_state=Bloom.OPEN , color=random.choice(list(Color))):
         super().__init__(flower_id, bee_model)
 
         self.sucrose_concentration = sucrose_concentration
