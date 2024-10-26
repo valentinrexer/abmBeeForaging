@@ -24,7 +24,7 @@ def generate_random_point(center_x, center_y, target_distance, tolerance=0.1):
 
 
 def get_surrounding(position, distance):
-    min_x, max_x = int(position[0] - 1.5 * distance), int(position[1] + 1.5 * distance)
+    min_x, max_x = int(position[0] - 1.5 * distance), int(position[0] + 1.5 * distance)
     min_y, max_y = int(position[1] - 1.5 * distance), int(position[1] + 1.5 * distance)
 
     surrounding = []
@@ -36,13 +36,14 @@ def get_surrounding(position, distance):
 
     return surrounding
 
-x = 30
-y = 30
+x = 2524
+y = 2266
 d = 10
 surr = get_surrounding((x,y), d)
 
+print(surr)
 
-
+'''
 for y in range(100):
     for x in range(100):
         if surr.__contains__((x, y)):
@@ -52,3 +53,4 @@ for y in range(100):
             print("0", end='')
 
     print()
+'''

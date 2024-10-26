@@ -10,6 +10,7 @@ import random
 #packages for data analysis
 import pandas as pd
 import numpy as np
+from matplotlib.mlab import window_none
 from mesa.time import SimultaneousActivation
 
 ### definition of fixed global variables ###
@@ -187,13 +188,14 @@ class BeeForagingModel(mesa.Model):
         self.schedule = SimultaneousActivation(self)
 
         # create grid ==> grid will have a size of source_distance + 70
-        self.grid = BeeGrid(source_distance + 70, GRID_RESOLUTION)
+        self.grid = BeeGrid((source_distance + 70) * 2, GRID_RESOLUTION)
 
         #create flower (food source) and place it on the grid
         #todo: ask for actual sucrose concentration
         flower = FlowerAgent(1, self, 1000)
         self.schedule.add(flower)
         self.flower_location = generate_random_point(self.grid.hive[0], self.grid.hive[1], source_distance * GRID_RESOLUTION, 0.01)
+        self.flower_range = get_surrounding(self.flower_location, FLOWER_SURROUNDING * GRID_RESOLUTION)
 
 
 
@@ -226,12 +228,13 @@ def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1):
 
         # If both coordinates are positive, return the point
         if x >= 0 and y >= 0:
-            return round(x, 2), round(y, 2)
+            print(math.sqrt((origin_x - x) ** 2 + (origin_y - y) ** 2))
+            return int(round(x, 2)), int(round(y, 2))
 
 
 
 def get_surrounding(position, distance):
-    min_x, max_x = int(position[0] - 1.5*distance), int(position[1] + 1.5*distance)
+    min_x, max_x = int(position[0] - 1.5*distance), int(position[0] + 1.5*distance)
     min_y, max_y = int(position[1] - 1.5*distance), int(position[1] + 1.5*distance)
 
     surrounding = []
@@ -246,14 +249,11 @@ def get_surrounding(position, distance):
 
 
 run_model = BeeForagingModel(100)
+print(run_model.grid.width)
+print(run_model.grid.height)
+print(run_model.flower_location)
+print(len(run_model.flower_range))
 
-for y in range(run_model.grid.height):
-    for x in range(run_model.grid.width):
-        cell_contents = run_model.grid.get_cell_list_contents([(x, y)])
-
-        if any(isinstance(flower, FlowerAgent) for flower in cell_contents):
-            print(x,y)
-            print(run_model.grid.hive)
 
 
 
