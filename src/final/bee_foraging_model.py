@@ -1,4 +1,6 @@
 #packages for modeling
+import math
+
 import mesa
 
 #packages for feature implementation
@@ -8,7 +10,7 @@ import random
 #packages for data analysis
 import pandas as pd
 import numpy as np
-
+from mesa.time import SimultaneousActivation
 
 ### definition of fixed global variables ###
 SUNRISE = 25,200 # tick when the sun rises
@@ -26,6 +28,10 @@ MAX_DANCE_ERROR = 50 #m
 
 NECTAR_REWARD = 353.8 #C
 
+
+### definition of model specific parameters ###
+GRID_RESOLUTION = 10
+FLOWER_SURROUNDING = 1
 
 
 ### definition of global attributes ###
@@ -95,14 +101,17 @@ class ForagingStrategy(Enum):
 """
 
 class FlowerAgent(mesa.Agent):
-    def __init__(self, flower_id, bee_model, sucrose_concentration, bloom_state=Bloom.OPEN , color=random.choice(list(Color))):
+    def __init__(self, flower_id, bee_model, sucrose_concentration, flower_range = 1, bloom_state=Bloom.OPEN , color=random.choice(list(Color))):
         super().__init__(flower_id, bee_model)
 
         self.sucrose_concentration = sucrose_concentration
 
         #optional variables
+        self.range = flower_range
         self.bloom_state = bloom_state
         self.color = color
+
+
 
 
 
@@ -154,3 +163,98 @@ class BeeGrid(mesa.space.MultiGrid):
         super().__init__(size * resolution, size * resolution, False)
         self.hive = (size * resolution // 2, size * resolution // 2)
         self.dance_floor = (self.hive[0] + 1, self.hive[1])
+
+
+
+"""
+    
+    Bee Foraging Model
+    
+    Args:
+        grid_size(int): size of the grid i.e. size x size
+        grid_resolution(int): resolution of the grid
+        
+        
+        
+"""
+
+class BeeForagingModel(mesa.Model):
+    def __init__(self, source_distance):
+        super().__init__()
+
+        # create schedule
+        self.schedule = SimultaneousActivation(self)
+
+        # create grid ==> grid will have a size of source_distance + 70
+        self.grid = BeeGrid(source_distance + 70, GRID_RESOLUTION)
+
+        #create flower (food source) and place it on the grid
+        #todo: ask for actual sucrose concentration
+        flower = FlowerAgent(1, self, 1000)
+        self.schedule.add(flower)
+        self.flower_location = generate_random_point(self.grid.hive[0], self.grid.hive[1], source_distance * GRID_RESOLUTION, 0.01)
+
+
+
+
+### model functions ###
+
+"""
+    Generates a random point with a given distance to the another points
+    
+    Args:
+        origin_x (int): x coordinate of the origin point
+        origin_y (int): y coordinate of the origin point
+        target_distance (int): distance to the given coordinates
+        tolerance (float): maximal deviation from the given distance
+    
+"""
+def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1):
+
+    while True:
+        angle = random.uniform(0, math.pi / 2)
+
+        # Add some randomness to the distance within the tolerance range
+        min_distance = target_distance * (1 - tolerance)
+        max_distance = target_distance * (1 + tolerance)
+        actual_distance = random.uniform(min_distance, max_distance)
+
+        # Calculate the point using polar coordinates
+        x = origin_x + actual_distance * math.cos(angle)
+        y = origin_y + actual_distance * math.sin(angle)
+
+        # If both coordinates are positive, return the point
+        if x >= 0 and y >= 0:
+            return round(x, 2), round(y, 2)
+
+
+
+def get_surrounding(position, distance):
+    min_x, max_x = int(position[0] - 1.5*distance), int(position[1] + 1.5*distance)
+    min_y, max_y = int(position[1] - 1.5*distance), int(position[1] + 1.5*distance)
+
+    surrounding = []
+
+    for y in range(min_y, max_y):
+        for x in range(min_x, max_x):
+            if math.sqrt((x - position[0]) ** 2 + (y - position[1]) ** 2) <= distance:
+                surrounding.append((x, y))
+
+    return surrounding
+
+
+
+run_model = BeeForagingModel(100)
+
+for y in range(run_model.grid.height):
+    for x in range(run_model.grid.width):
+        cell_contents = run_model.grid.get_cell_list_contents([(x, y)])
+
+        if any(isinstance(flower, FlowerAgent) for flower in cell_contents):
+            print(x,y)
+            print(run_model.grid.hive)
+
+
+
+
+
