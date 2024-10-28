@@ -63,5 +63,3 @@ def __main__():
         print(f'{k}: {model.hive_stock}')
 
 
-if __name__ == '__main__':
-    __main__()
