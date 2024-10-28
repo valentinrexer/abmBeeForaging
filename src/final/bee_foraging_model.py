@@ -277,6 +277,9 @@ def get_next_point(current_x, current_y, angle, distance):
     y_next = current_y + distance * math.sin(angle)
     return round(x_next, 2), round(y_next, 2)
 
+"""
+    Calculate the distance between two points
+"""
 
 def get_distance(pos1, pos2):
     return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
