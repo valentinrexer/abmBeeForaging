@@ -1,7 +1,7 @@
 #packages for modeling
 import math
-
 import mesa
+from mesa.time import SimultaneousActivation
 
 #packages for feature implementation
 from enum import Enum
@@ -10,8 +10,6 @@ import random
 #packages for data analysis
 import pandas as pd
 import numpy as np
-from matplotlib.mlab import window_none
-from mesa.time import SimultaneousActivation
 
 ### definition of fixed global variables ###
 SUNRISE = 25,200 # tick when the sun rises
@@ -129,12 +127,25 @@ class FlowerAgent(mesa.Agent):
     Args:
         bee_id (int): unique id of the bee agent
         bee_model (mesa.Model): model where the bee agent is placed
+        days_of_experience (int): number of days of experience
+        forager_type (BeeForagerType): type of bee agent
+        start_pos ((float, float)): starting position of the bee agent
+        
+    Variables:
+        target_pos ((float, float)): position the bee agent is heading to 
         
 """
 class ForagerBeeAgent(mesa.Agent):
-    def __init__(self, bee_id, bee_model):
+    def __init__(self, bee_id, bee_model, forager_type, days_of_experience,  start_pos):
         super().__init__(bee_id, bee_model)
 
+        self.forager_type = forager_type
+        self.days_of_experience = days_of_experience
+        self.bee_acc_pos = start_pos
+
+
+
+        self.target_pos = None
 
 
 
@@ -215,7 +226,7 @@ class BeeForagingModel(mesa.Model):
 def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1):
 
     while True:
-        angle = random.uniform(0, math.pi / 2)
+        angle = random.uniform(0, 2* math.pi)
 
         # Add some randomness to the distance within the tolerance range
         min_distance = target_distance * (1 - tolerance)
@@ -228,11 +239,16 @@ def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1):
 
         # If both coordinates are positive, return the point
         if x >= 0 and y >= 0:
-            print(math.sqrt((origin_x - x) ** 2 + (origin_y - y) ** 2))
-            return int(round(x, 2)), int(round(y, 2))
+            return int(round(x, 2)), int(round(y, 2)), angle
 
 
-
+"""
+    Returns a list of points that are within a given distance from the origin
+    
+    Args:
+        position (int, int): center of the area
+        distance (float): distance from the center of the area that's considered a surrounding
+"""
 def get_surrounding(position, distance):
     min_x, max_x = int(position[0] - 1.5*distance), int(position[0] + 1.5*distance)
     min_y, max_y = int(position[1] - 1.5*distance), int(position[1] + 1.5*distance)
@@ -246,14 +262,29 @@ def get_surrounding(position, distance):
 
     return surrounding
 
+"""
+    Returns the next point given a start point, direction(angle) and distance
+    
+    Args:
+        current_x (int): x coordinate of the current point
+        current_y (int): y coordinate of the current point
+        angle (float): angle between 0 and 2pi that determines the direction of movement
+        distance (float): distance that's to be covered 
+"""
+
+def get_next_point(current_x, current_y, angle, distance):
+    x_next = current_x + distance * math.cos(angle)
+    y_next = current_y + distance * math.sin(angle)
+    return round(x_next, 2), round(y_next, 2)
+
+
+def get_distance(pos1, pos2):
+    return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
+
 
 
 run_model = BeeForagingModel(100)
-print(run_model.grid.width)
-print(run_model.grid.height)
-print(run_model.flower_location)
-print(len(run_model.flower_range))
-
+print("Bee Foraging Model")
 
 
 
