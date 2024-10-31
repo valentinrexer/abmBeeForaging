@@ -11,10 +11,12 @@ import random
 import pandas as pd
 import numpy as np
 
+
+
 ### definition of fixed global variables ###
-SUNRISE = 25,200 # tick when the sun rises
-SUNSET = 68,400 # tick when the sun sets
-TICKS_PER_DAY = 86,400 # amount of ticks at a full day
+SUNRISE = 7 * 3600 # tick when the sun rises
+SUNSET = 19 * 3600 # tick when the sun sets
+TICKS_PER_DAY = 24 * 3600 # amount of ticks at a full day
 
 RESTING_ENERGY_COST = 6.2 #mW
 UNLOADING_NECTAR_ENERGY_COST = 9.3 #mW
@@ -22,14 +24,14 @@ FLYING_COST_UNLOADED = 37.0 #mW
 FLYING_COST_LOADED = 75 #mW
 FLYING_SPEED = 6.944 #m/s
 SEARCHING_SPEED = FLYING_SPEED / 3 #m/s
-MAX_SEARCH_TIME = 960 #s
+MAX_SEARCH_TIME = 960 #s [or ticks]
 MAX_DANCE_ERROR = 50 #m
 
 NECTAR_REWARD = 353.8 #C
 
 
 ### definition of model specific parameters ###
-GRID_RESOLUTION = 10
+GRID_RESOLUTION = 1
 FLOWER_SURROUNDING = 1
 
 
@@ -148,6 +150,25 @@ class ForagerBeeAgent(mesa.Agent):
         self.target_pos = None
 
 
+    def fly_to_point(self, destination, speed):
+        if self.model.grid.out_of_bounds(destination):
+            raise ValueError("Destination out of bounds")
+
+        direction = get_angle(self.bee_acc_pos, destination)
+
+        current_distance = math.sqrt((self.bee_acc_pos[0] - destination[0]) ** 2 + (self.bee_acc_pos[1] - destination[1]) ** 2)
+
+        if current_distance < speed:
+            self.bee_acc_pos = destination
+            self.model.grid.move_agent(self, (int(destination[0]), int(destination[1])))
+
+        else:
+            new_pos = (self.bee_acc_pos[0] + speed * math.cos(direction), self.bee_acc_pos[1] + speed * math.sin(direction))
+            if not self.model.grid.out_of_bounds((int(new_pos[0]), int(new_pos[1]))):
+                self.bee_acc_pos = new_pos
+                self.model.grid.move_agent(self, (int(new_pos[0]), int(new_pos[1])))
+
+
 
 
 
@@ -223,9 +244,9 @@ class BeeForagingModel(mesa.Model):
         tolerance (float): maximal deviation from the given distance
     
 """
-def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1):
+def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1, max_attempts=10000):
 
-    while True:
+    for _ in range(max_attempts):
         angle = random.uniform(0, 2* math.pi)
 
         # Add some randomness to the distance within the tolerance range
@@ -284,10 +305,39 @@ def get_next_point(current_x, current_y, angle, distance):
 def get_distance(pos1, pos2):
     return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
 
+"""
+    the angle in a triangle is calculated by arctan(y/x) 
+    
+    We use this principle to calculate the angle/direction in which an object would have to
+    be moved to reach a given point 
+"""
+
+def get_angle(starting_point, destination_point):
+    dx = destination_point[0] - starting_point[0]
+    dy = destination_point[1] - starting_point[1]
+
+    angle = math.atan2(dy, dx)
+
+    # Convert from [-π, π] to [0, 2π]
+    if angle < 0:
+        angle += 2 * math.pi
+
+    return angle
 
 
 run_model = BeeForagingModel(100)
-print("Bee Foraging Model")
+
+bee = ForagerBeeAgent(1, run_model, BeeForagerType.PERSISTENT, 1, run_model.grid.hive)
+run_model.grid.place_agent(bee, run_model.grid.hive)
+print(run_model.grid.hive)
+for _ in range(50):
+    dest = (1,170)
+    bee.fly_to_point(dest, FLYING_SPEED)
+    print(dest)
+    print(bee.bee_acc_pos)
+
+
+
 
 
 
