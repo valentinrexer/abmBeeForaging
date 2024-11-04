@@ -16,7 +16,7 @@ import numpy as np
 ### definition of fixed global variables ###
 SUNRISE = 7 * 3600 # tick when the sun rises
 SUNSET = 19 * 3600 # tick when the sun sets
-TICKS_PER_DAY = 24 * 3600 # amount of ticks at a full day
+TICKS_PER_DAY = 24 * 3600 # amount of ticks in a full day
 
 RESTING_ENERGY_COST = 6.2 #mW
 UNLOADING_NECTAR_ENERGY_COST = 9.3 #mW
@@ -24,6 +24,8 @@ FLYING_COST_UNLOADED = 37.0 #mW
 FLYING_COST_LOADED = 75 #mW
 FLYING_SPEED = 6.944 #m/s
 SEARCHING_SPEED = FLYING_SPEED / 3 #m/s
+SEARCHING_ANGLE_RANGE = (-60.0, 60.0) #°
+
 MAX_SEARCH_TIME = 960 #s [or ticks]
 MAX_DANCE_ERROR = 50 #m
 
@@ -32,8 +34,8 @@ NECTAR_REWARD = 353.8 #C
 
 ### definition of model specific parameters ###
 GRID_RESOLUTION = 1
-FLOWER_SURROUNDING = 1
-
+MAX_SIGHT = 1
+MIN_BORDER_DISTANCE = 3
 
 ### definition of global attributes ###
 
@@ -89,20 +91,21 @@ class ForagingStrategy(Enum):
 
 
 # definition of the Flower Class
-"""
-    Represents a single flower in the model 
-    
-    Args:
-        flower_id (int): unique id of the flower agent
-        bee_model (mesa.Model): model where the agent is placed
-        sucrose_concentration (float): sucrose concentration in the flower
-        
-        flower_range (float): 
-        closed (bool) [optional]: flower is closed
-        color (Color) [optional]: color of the flower
-"""
+
 
 class FlowerAgent(mesa.Agent):
+    """
+        Represents a single flower in the model
+
+        Args:
+            flower_id (int): unique id of the flower agent
+            bee_model (mesa.Model): model where the agent is placed
+            sucrose_concentration (float): sucrose concentration in the flower
+
+            flower_range (float):
+            closed (bool) [optional]: flower is closed
+            color (Color) [optional]: color of the flower
+    """
     def __init__(self, flower_id, bee_model, sucrose_concentration, flower_range = 1.0, bloom_state=Bloom.OPEN , color=random.choice(list(Color))):
         super().__init__(flower_id, bee_model)
 
@@ -122,76 +125,115 @@ class FlowerAgent(mesa.Agent):
 
 
 
-"""
 
-    Represents a single forager bee in the model
-    
-    Args:
-        bee_id (int): unique id of the bee agent
-        bee_model (mesa.Model): model where the bee agent is placed
-        days_of_experience (int): number of days of experience
-        forager_type (BeeForagerType): type of bee agent
-        start_pos ((float, float)): starting position of the bee agent
-        
-    Variables:
-        target_pos ((float, float)): position the bee agent is heading to 
-        
-"""
 class ForagerBeeAgent(mesa.Agent):
+    """
+
+        Represents a single forager bee in the model
+
+        Args:
+            bee_id (int): unique id of the bee agent
+            bee_model (mesa.Model): model where the bee agent is placed
+            days_of_experience (int): number of days of experience
+            forager_type (BeeForagerType): type of bee agent
+            start_pos ((float, float)): starting position of the bee agent
+
+        Variables:
+            target_pos ((float, float)): position the bee agent is heading to
+            last_angle (float): flying angle of the bee agent at the last step
+
+    """
     def __init__(self, bee_id, bee_model, forager_type, days_of_experience,  start_pos):
         super().__init__(bee_id, bee_model)
 
         self.forager_type = forager_type
         self.days_of_experience = days_of_experience
-        self.bee_acc_pos = start_pos
+        self.accurate_position = start_pos
 
 
 
         self.target_pos = None
+        self.last_angle = 0.0
 
 
-    def fly_to_point(self, destination, speed):
+
+    #todo: include energy loss function
+
+
+    def search(self, destination):
+        if get_distance(self.accurate_position, destination) <= MAX_SIGHT or self.last_move_crossed_flower_radius(self.last_angle, SEARCHING_SPEED):
+            self.move_bee_towards_point(destination, SEARCHING_SPEED)
+
+        elif self.model.grid.is_close_to_border(self.accurate_position):
+            angle = (self.last_angle + math.pi) % (math.pi *2)
+            self.move_bee_with_angle(angle, SEARCHING_SPEED)
+
+        else:
+            angle = (self.last_angle + random.uniform(math.radians(SEARCHING_ANGLE_RANGE[0]), math.radians(SEARCHING_ANGLE_RANGE[1]))) % (2 * math.pi)
+            self.move_bee_with_angle(angle, SEARCHING_SPEED)
+
+
+
+    def move_bee_towards_point(self, destination, speed):
         if self.model.grid.out_of_bounds(destination):
             raise ValueError("Destination out of bounds")
 
-        direction = get_angle(self.bee_acc_pos, destination)
-
-        current_distance = math.sqrt((self.bee_acc_pos[0] - destination[0]) ** 2 + (self.bee_acc_pos[1] - destination[1]) ** 2)
+        angle = get_angle(self.accurate_position, destination)
+        current_distance = math.sqrt((self.accurate_position[0] - destination[0]) ** 2 + (self.accurate_position[1] - destination[1]) ** 2)
 
         if current_distance < speed:
-            self.bee_acc_pos = destination
+            self.accurate_position = destination
             self.model.grid.move_agent(self, (int(destination[0]), int(destination[1])))
+            self.last_angle = angle
 
         else:
-            new_pos = (self.bee_acc_pos[0] + speed * math.cos(direction), self.bee_acc_pos[1] + speed * math.sin(direction))
-            if not self.model.grid.out_of_bounds((int(new_pos[0]), int(new_pos[1]))):
-                self.bee_acc_pos = new_pos
+            new_pos = (self.accurate_position[0] + speed * math.cos(angle), self.accurate_position[1] + speed * math.sin(angle))
+            if not self.model.grid.out_of_bounds(new_pos):
+                self.accurate_position = new_pos
                 self.model.grid.move_agent(self, (int(new_pos[0]), int(new_pos[1])))
+                self.last_angle = angle
 
 
 
 
+    def move_bee_with_angle(self, angle, speed):
+        if not 0 <= angle <= math.pi * 2:
+            raise ValueError("Angle out of range")
+
+        new_pos = (self.accurate_position[0] + speed * math.cos(angle), self.accurate_position[1] + speed * math.sin(angle))
+
+        if not self.model.grid.out_of_bounds(new_pos):
+            self.accurate_position = new_pos
+            self.model.grid.move_agent(self, (int(new_pos[0]), int(new_pos[1])))
+            self.last_angle = angle
 
 
+    def last_move_crossed_flower_radius(self, last_angle, speed):
+        curr_x, curr_y = self.accurate_position
+        last_x = self.accurate_position[0] - speed * math.cos(last_angle)
+        last_y = self.accurate_position[1] - speed * math.sin(last_angle)
 
-"""
+        return circle_line_intersect((last_x, last_y), (curr_x, curr_y), self.model.flower_location, MAX_SIGHT)
 
-    Custom Grid to model the environment for the simulation
-    
-    Args:
-        size (int): size of the grid i.e. size x size
-        resolution (int): resolution of the grid (e.g. resolution=10 means 1m = 10 units size units in the model)
-    
-    Variables:
-        hive ( (int,int) ): position of the hive ==> bee agents are located here while they rest or unload, 
-                            located at the center of the grid
-                            
-        dance_floor ( (int,int) ): position of the dance floor ==> bee agents are located here while they cluster or dance
-                                   located at (hive_x+1, hive_y)
-"""
+
 
 
 class BeeGrid(mesa.space.MultiGrid):
+    """
+
+        Custom Grid to model the environment for the simulation
+
+        Args:
+            size (int): size of the grid i.e. size x size
+            resolution (int): resolution of the grid (e.g. resolution=10 means 1m = 10 units size units in the model)
+
+        Variables:
+            hive ( (int,int) ): position of the hive ==> bee agents are located here while they rest or unload,
+                                located at the center of the grid
+
+            dance_floor ( (int,int) ): position of the dance floor ==> bee agents are located here while they cluster or dance
+                                       located at (hive_x+1, hive_y)
+    """
 
     def __init__(self, size, resolution):
         super().__init__(size * resolution, size * resolution, False)
@@ -199,20 +241,44 @@ class BeeGrid(mesa.space.MultiGrid):
         self.dance_floor = (self.hive[0] + 1, self.hive[1])
 
 
+    def is_close_to_border(self, point):
+        x,y = point
+        return x < MIN_BORDER_DISTANCE or x > self.width - MIN_BORDER_DISTANCE or y < MIN_BORDER_DISTANCE or y > self.height - MIN_BORDER_DISTANCE
 
-"""
-    
-    Bee Foraging Model
-    
-    Args:
-        grid_size(int): size of the grid i.e. size x size
-        grid_resolution(int): resolution of the grid
-        
-        
-        
-"""
+
+
+    def visualize_bee_grid(self):
+        print()
+        for y in range(self.height):
+            for x in range(self.width):
+                if (x,y) is self.dance_floor:
+                    print("D", end="")
+                elif (x,y) is self.hive:
+                    print("H", end="")
+                elif any(isinstance(flower, FlowerAgent) for flower in self.get_cell_list_contents([(x,y)])):
+                    print("F", end="")
+                elif any(isinstance(f_bee, ForagerBeeAgent) for f_bee in self.get_cell_list_contents([(x,y)])):
+                    print("B", end="")
+                else:
+                    print("_", end="")
+        print()
+
+
+
+
 
 class BeeForagingModel(mesa.Model):
+    """
+
+        Bee Foraging Model
+
+        Args:
+            grid_size(int): size of the grid i.e. size x size
+            grid_resolution(int): resolution of the grid
+
+
+
+    """
     def __init__(self, source_distance):
         super().__init__()
 
@@ -227,25 +293,25 @@ class BeeForagingModel(mesa.Model):
         flower = FlowerAgent(1, self, 1000)
         self.schedule.add(flower)
         self.flower_location = generate_random_point(self.grid.hive[0], self.grid.hive[1], source_distance * GRID_RESOLUTION, 0.01)
-        self.flower_range = get_surrounding(self.flower_location, FLOWER_SURROUNDING * GRID_RESOLUTION)
+        self.flower_range = get_surrounding(self.flower_location, MAX_SIGHT * GRID_RESOLUTION)
 
 
 
 
 ### model functions ###
 
-"""
-    Generates a random point with a given distance to the another points
-    
-    Args:
-        origin_x (int): x coordinate of the origin point
-        origin_y (int): y coordinate of the origin point
-        target_distance (int): distance to the given coordinates
-        tolerance (float): maximal deviation from the given distance
-    
-"""
-def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1, max_attempts=10000):
 
+def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1, max_attempts=10000):
+    """
+        Generates a random point with a given distance to the another points
+
+        Args:
+            origin_x (int): x coordinate of the origin point
+            origin_y (int): y coordinate of the origin point
+            target_distance (int): distance to the given coordinates
+            tolerance (float): maximal deviation from the given distance
+
+    """
     for _ in range(max_attempts):
         angle = random.uniform(0, 2* math.pi)
 
@@ -260,17 +326,18 @@ def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1, ma
 
         # If both coordinates are positive, return the point
         if x >= 0 and y >= 0:
-            return int(round(x, 2)), int(round(y, 2)), angle
+            return int(round(x, 2)), int(round(y, 2))
 
 
-"""
-    Returns a list of points that are within a given distance from the origin
-    
-    Args:
-        position (int, int): center of the area
-        distance (float): distance from the center of the area that's considered a surrounding
-"""
+
 def get_surrounding(position, distance):
+    """
+        Returns a list of points that are within a given distance from the origin
+
+        Args:
+            position (int, int): center of the area
+            distance (float): distance from the center of the area that's considered a surrounding
+    """
     min_x, max_x = int(position[0] - 1.5*distance), int(position[0] + 1.5*distance)
     min_y, max_y = int(position[1] - 1.5*distance), int(position[1] + 1.5*distance)
 
@@ -283,36 +350,42 @@ def get_surrounding(position, distance):
 
     return surrounding
 
-"""
-    Returns the next point given a start point, direction(angle) and distance
-    
-    Args:
-        current_x (int): x coordinate of the current point
-        current_y (int): y coordinate of the current point
-        angle (float): angle between 0 and 2pi that determines the direction of movement
-        distance (float): distance that's to be covered 
-"""
+
 
 def get_next_point(current_x, current_y, angle, distance):
+    """
+        Returns the next point given a start point, direction(angle) and distance
+
+        Args:
+            current_x (int): x coordinate of the current point
+            current_y (int): y coordinate of the current point
+            angle (float): angle between 0 and 2pi that determines the direction of movement
+            distance (float): distance that's to be covered
+    """
     x_next = current_x + distance * math.cos(angle)
     y_next = current_y + distance * math.sin(angle)
     return round(x_next, 2), round(y_next, 2)
 
-"""
-    Calculate the distance between two points
-"""
+
 
 def get_distance(pos1, pos2):
+    """
+        Uses euclidian distance
+    """
     return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
 
-"""
-    the angle in a triangle is calculated by arctan(y/x) 
-    
-    We use this principle to calculate the angle/direction in which an object would have to
-    be moved to reach a given point 
-"""
+
+
+
 
 def get_angle(starting_point, destination_point):
+    """
+        the angle in a triangle is calculated by arctan(y/x)
+
+        We use this principle to calculate the angle/direction in which an object would have to
+        be moved to reach a given point
+    """
+
     dx = destination_point[0] - starting_point[0]
     dy = destination_point[1] - starting_point[1]
 
@@ -325,21 +398,82 @@ def get_angle(starting_point, destination_point):
     return angle
 
 
-run_model = BeeForagingModel(100)
 
-bee = ForagerBeeAgent(1, run_model, BeeForagerType.PERSISTENT, 1, run_model.grid.hive)
-run_model.grid.place_agent(bee, run_model.grid.hive)
-print(run_model.grid.hive)
-for _ in range(50):
-    dest = (1,170)
-    bee.fly_to_point(dest, FLYING_SPEED)
-    print(dest)
-    print(bee.bee_acc_pos)
+def radians_to_degrees(radians):
+    return radians * (180 / math.pi)
 
 
+def circle_line_intersect(p1, p2, circle_center, radius):
+    # Extract coordinates
+    x1, y1 = p1
+    x2, y2 = p2
+    cx, cy = circle_center
+
+    # Vector from p1 to p2
+    dx = x2 - x1
+    dy = y2 - y1
+
+    # Vector from p1 to circle center
+    pcx = cx - x1
+    pcy = cy - y1
+
+    # Length of line segment squared
+    line_length_sq = dx * dx + dy * dy
+
+    # Skip if line segment has zero length
+    if line_length_sq == 0:
+        # Check if p1 is within circle
+        return math.sqrt(pcx * pcx + pcy * pcy) <= radius
+
+    # Project circle center onto line segment
+    proj = (pcx * dx + pcy * dy) / line_length_sq
+
+    # Find closest point on line segment to circle center
+    if proj < 0:
+        closest_x, closest_y = x1, y1
+    elif proj > 1:
+        closest_x, closest_y = x2, y2
+    else:
+        closest_x = x1 + proj * dx
+        closest_y = y1 + proj * dy
+
+    # Calculate distance from closest point to circle center
+    distance = math.sqrt(
+        (closest_x - cx) * (closest_x - cx) +
+        (closest_y - cy) * (closest_y - cy)
+    )
+
+    # Compare with radius
+    return distance <= radius
 
 
 
+succ = 0
+
+for _ in range(500):
+    run_model = BeeForagingModel(900)
+
+    bee = ForagerBeeAgent(1, run_model, BeeForagerType.PERSISTENT, 1, run_model.grid.hive)
+    run_model.grid.place_agent(bee, run_model.grid.hive)
+
+    target = run_model.flower_location
+    dance_location = (run_model.flower_location[0]-5, run_model.flower_location[1]+5)
+
+    bee.target_pos = dance_location
+
+
+    while bee.accurate_position is not dance_location:
+        bee.move_bee_towards_point(bee.target_pos, FLYING_SPEED)
+
+
+    for i in range(960):
+        if bee.accurate_position is target:
+            succ += 1
+            break
+
+
+    print(run_model.flower_location)
 
 
 
+print(succ)
