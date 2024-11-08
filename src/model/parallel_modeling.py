@@ -3,7 +3,6 @@ import math
 import sys
 
 import mesa
-from decorator import append
 from mesa.time import SimultaneousActivation
 
 #packages for feature implementation
@@ -47,7 +46,7 @@ MAX_SEARCH_RADIUS = 50  #m max radius in which bee looks for the source
 
 ### definition of normal distribution variables for random drawing ###
 MEAN = 0
-STANDARD_DEVIATION = 110
+STANDARD_DEVIATION = 20
 
 
 ### definition of global attributes ###
@@ -193,7 +192,9 @@ class ForagerBeeAgent(mesa.Agent):
             self.move_bee_with_angle(angle, SEARCHING_SPEED)
 
         else:
-            angle = random_deviate_angle(self.last_angle, MEAN, STANDARD_DEVIATION, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
+            custom_sd = (MAX_SEARCH_RADIUS - get_distance(self.accurate_position, self.search_area_center)) / MAX_SEARCH_RADIUS * SEARCHING_ANGLE_RANGE[1]
+
+            angle = random_deviate_angle(self.last_angle, MEAN, self.model.STANDARD_DEVIATION, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
             self.move_bee_with_angle(angle, SEARCHING_SPEED)
 
 
@@ -325,7 +326,7 @@ class BeeForagingModel(mesa.Model):
 
 
     """
-    def __init__(self, source_distance):
+    def __init__(self, source_distance,sd):
         super().__init__()
 
         # create schedule
@@ -339,6 +340,7 @@ class BeeForagingModel(mesa.Model):
         flower = FlowerAgent(1, self, 1000)
         self.schedule.add(flower)
         self.flower_location = generate_random_point(self.grid.hive[0], self.grid.hive[1], source_distance, 0.01)
+        self.STANDARD_DEVIATION = sd
 
 
 
@@ -511,7 +513,7 @@ def run_bee_model_instance(params):
 
     distance, foragers, sd = params
 
-    model_instance = BeeForagingModel(int(distance))
+    model_instance = BeeForagingModel(int(distance), sd)
 
     for k in range(int(foragers)):
         bee_agent = ForagerBeeAgent(k, model_instance, BeeForagerType.PERSISTENT, 1, model_instance.grid.hive)
@@ -558,6 +560,7 @@ def run_bee_model_instance(params):
 
     return found_at_day
 
+vals = [-1, -5,-10,-20,-25,-30,-40]
 
 def parallel_run(num_processes, num_iterations, params):
     # Create a list of parameter tuples for each iteration
@@ -569,72 +572,85 @@ def parallel_run(num_processes, num_iterations, params):
     return results
 
 
+SD_S = [10, 80, 90, 100, 110]
+all_overall = []
+all_overall_cnt = []
 
+for _ in range(7):
+    all_overall.append(0.0)
+    all_overall_cnt.append(0)
 
 
 
 def __main__(args):
-    model_instance = BeeForagingModel(900)
-    svg_string = ""
-    bee = None
+    for sd in SD_S:
+        print(sd)
+
+        for _ in range(2):
+
+            num_processes = mp.cpu_count()-2
+            num_iterations = 50
+
+            # Define parameters as a tuple
+            params = (900, 500, sd)  # (distance, foragers)
+
+            results = parallel_run(num_processes, num_iterations, params)
 
 
-    for _ in range(1):
-        forager = ForagerBeeAgent(_, model_instance, BeeForagerType.PERSISTENT, 1, model_instance.grid.hive)
-        forager.status = BeeStatus.FLYING_OUT
-        forager.targeted_position = (model_instance.flower_location[0] + random.randint(-35,35), model_instance.flower_location[1] + random.randint(-35,35))
-        model_instance.grid.place_agent(forager, model_instance.grid.hive)
-        model_instance.schedule.add(forager)
-        bee = forager
+            longest_try = 0
 
-    svg_string += "M" + str(model_instance.grid.hive[0])+","+str(model_instance.grid.hive[1])+" "
-    for step in range(960):
-        model_instance.schedule.step()
-        for forager in model_instance.schedule.agents:
-            if isinstance(forager, ForagerBeeAgent) and forager.unique_id == 0:
-                x = forager.accurate_position[0]
-                y = forager.accurate_position[1]
-                x = int(x*100) / 100.0
-                y = int(y*100) / 100.0
+            for result in results:
+                # print(result)
+                if len(result) > longest_try:
+                    longest_try = len(result)
 
 
-                svg_string += "L"+str(x)+","+str(y)+" "
+            arranged_res = []
+
+            for result in results:
+                arranged_result = []
+
+                for elem in result:
+                    arranged_result.append(elem)
+
+                for _ in range(longest_try - len(result)):
+                    arranged_result.append(500)
+
+                arranged_res.append(arranged_result)
+
+            avg = []
+            avg_count = []
+            for _ in range(longest_try):
+                avg.append(0.0)
+                avg_count.append(0)
+
+            for day in range(longest_try):
+                for result in arranged_res:
+                    if len(result) > day:
+                        avg[day] += result[day]
+                        avg_count[day] += 1
+
+
+            for day in range(len(avg)):
+                avg[day] /= avg_count[day]
+                avg[day] = int(avg[day])
+
+            print(avg)
 
 
 
-    file_string = ""
-    with open("/home/valentin-rexer/uni/UofM/abm_files/sample.svg", 'r') as sample:
-        for line in sample:
-            file_string += line
-
-    file_string += svg_string + '"'
+            print()
 
 
+        print()
 
-    file_string += """
-         fill="none"
-          stroke="#2563eb"
-          stroke-width="0.5"
-          stroke-linecap="round"
-          stroke-linejoin="round" />
-    """
 
-    file_string += "\n<!-- Dots -->\n"
+    for l in range(len(all_overall)):
+        all_overall[l] = all_overall[l] / all_overall_cnt[l]
 
-    # Add circles with variables
-    file_string += f'<circle cx="{model_instance.flower_location[0]}" cy="{model_instance.flower_location[1]}" r="{1}" fill="#4CAF50" /> <!-- Circle -->\n'
-    file_string += f'\n<circle cx="{forager.targeted_position[0]}" cy="{forager.targeted_position[1]}" r="{MAX_SEARCH_RADIUS}" fill="none" stroke="#4CAF50" stroke-width="{0.3}" />\n'
+    print("all overall")
+    print(all_overall)
 
-    file_string += "\n</svg>"
-
-    with open("/home/valentin-rexer/uni/UofM/abm_files/final.svg", "w") as final:
-        final.write(file_string)
-
-    print("flower")
-    print(model_instance.flower_location)
-
-    if bee.accurate_position is model_instance.flower_location:
-        print("ounf")
 
 if __name__ == '__main__':
     __main__(sys.argv)
