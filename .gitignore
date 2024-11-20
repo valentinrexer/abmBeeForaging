@@ -5,3 +5,4 @@ src/model/build/
 
 .idea/
 *.spec
+__pycache__/
