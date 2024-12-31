@@ -1,6 +1,7 @@
 #packages for modeling
 import math
 import sys
+import warnings
 
 import mesa
 from decorator import append
@@ -18,12 +19,11 @@ import pandas as pd
 import numpy as np
 
 
-
-
 ### definition of fixed global variables ###
 SUNRISE = 7 * 3600 # tick when the sun rises
 SUNSET = 19 * 3600 # tick when the sun sets
 TICKS_PER_DAY = 24 * 3600 # amount of ticks in a full day
+NUMBER_OF_DAYS = 5 # number of simulated days per simulation
 
 RESTING_ENERGY_COST = 6.2 #mW
 UNLOADING_NECTAR_ENERGY_COST = 9.3 #mW
@@ -36,7 +36,7 @@ SEARCHING_ANGLE_RANGE = (-120.0, 120.0) #°
 MAX_SEARCH_TIME = 960 #s [or ticks]
 MAX_DANCE_ERROR = 30 #m
 
-NECTAR_REWARD = 353.8 #C
+NECTAR_REWARD = 353.8 #*C
 
 
 ### definition of model specific parameters ###
@@ -47,7 +47,7 @@ MAX_SEARCH_RADIUS = 50  #m max radius in which bee looks for the source
 
 ### definition of normal distribution variables for random drawing ###
 MEAN = 0
-STANDARD_DEVIATION = 110
+STANDARD_DEVIATION = 35
 
 
 ### definition of global attributes ###
@@ -61,12 +61,10 @@ class Color(Enum):
     YELLOW = 5,
     WHITE = 6,
 
-
 #flower closed
 class Bloom(Enum):
     OPEN = True,
     CLOSED = False
-
 
 #todo: will probably be replaced/removed later (experience status might be retrievable from days known variable)
 #bee forager experienced status
@@ -74,24 +72,24 @@ class BeeForagerExperienceStatus(Enum):
     EXPERIENCED_FORAGER = 1,
     NEW_FORAGER = 2,
 
-
 #bee forager type
 class BeeForagerType(Enum):
     PERSISTENT = 1,
     RETICENT = 2,
-
 
 #bee status
 class BeeStatus(Enum):
     RESTING = 1,
     CLUSTERING = 2,
     DANCING = 3,
-    FLYING_OUT = 4,
-    RETURNING = 5,
-    LOADING_NECTAR = 6,
-    UNLOADING_NECTAR = 7,
-    SEARCHING_ADVERTISED_SOURCE = 8,
-
+    WATCHING_WAGGLE_DANCE = 4,
+    FLYING_OUT = 5,
+    RETURNING = 6,
+    LOADING_NECTAR = 7,
+    UNLOADING_NECTAR = 8,
+    FLYING_TO_SEARCH_AREA = 9,
+    SEARCHING_ADVERTISED_SOURCE = 10,
+    PREPARING_TO_FLY_OUT = 11,
 
 #foraging strategy
 class ForagingStrategy(Enum):
@@ -100,12 +98,7 @@ class ForagingStrategy(Enum):
     STRATEGY_100 = 3,
     STRATEGY_40_60_80 = 4,
 
-
-
-
 # definition of the Flower Class
-
-
 class FlowerAgent(mesa.Agent):
     """
         Represents a single flower in the model
@@ -113,31 +106,21 @@ class FlowerAgent(mesa.Agent):
         Args:
             flower_id (int): unique id of the flower agent
             bee_model (mesa.Model): model where the agent is placed
-            sucrose_concentration (float): sucrose concentration in the flower
+            sucrose_stock (float): available nectar / sucrose in the flower
 
             flower_range (float):
             closed (bool) [optional]: flower is closed
             color (Color) [optional]: color of the flower
     """
-    def __init__(self, flower_id, bee_model, sucrose_concentration, flower_range = 1.0, bloom_state=Bloom.OPEN , color=random.choice(list(Color))):
+    def __init__(self, flower_id, bee_model, sucrose_stock, flower_range = 1.0, bloom_state=Bloom.OPEN , color=random.choice(list(Color))):
         super().__init__(flower_id, bee_model)
 
-        self.sucrose_concentration = sucrose_concentration
+        self.sucrose_stock = sucrose_stock
 
         #optional variables
         self.range = flower_range
         self.bloom_state = bloom_state
         self.color = color
-
-
-
-
-
-
-
-
-
-
 
 class ForagerBeeAgent(mesa.Agent):
     """
@@ -156,21 +139,72 @@ class ForagerBeeAgent(mesa.Agent):
             last_angle (float): flying angle of the bee agent at the last step
 
     """
-    def __init__(self, bee_id, bee_model, forager_type, days_of_experience,  start_pos):
+    def __init__(self, bee_id, bee_model, forager_type, days_of_experience,  start_pos, time_source_found=-1):
         super().__init__(bee_id, bee_model)
 
         self.forager_type = forager_type
         self.days_of_experience = days_of_experience
         self.accurate_position = start_pos
-
         self.status = BeeStatus.RESTING
+        self.remaining_time_in_state = 0
+        self.time_source_found = time_source_found
+
         self.targeted_position = self.model.grid.hive
         self.last_angle = 0.0
         self.search_area_center = self.model.grid.hive
+        self.currently_watched_bee = None
+        self.homing_motivation = 0
+        self.sucrose_load = 0
+
 
 
 
     #todo: include energy loss function
+
+    def anticipation(self, method, time_source_found, days_of_experience, sunrise, sunset):
+        """
+        Simulating the bees anticipation behaviour based on her experience
+
+        :param method: Anticipation method
+        :param time_source_found: time that the bee found the source
+        :param days_of_experience: Days passed since the bee found the source
+        :param sunrise: sunrise time for this simulation
+        :param sunset: sunset time for this simulation
+        :return: anticipated time for soucre
+        """
+
+        if not sunrise <= time_source_found <= sunset:
+            warnings.warn("Invalid argument for time_source_found")
+
+        if method == 1:
+            return time_source_found
+
+        elif method == 2:
+
+            return time_source_found - 3600 * 4 * (time_source_found - sunrise) / (sunset - sunrise)
+
+        elif method == 3 or method == 4:
+
+            subtract_anticipation = [3600 * 2, 3600 * 1.5, 3600]
+            initial_anticipation = time_source_found - subtract_anticipation[days_of_experience - 1]
+
+            if method == 4:
+                initial_anticipation -= subtract_anticipation[days_of_experience - 1]
+
+            if initial_anticipation < sunrise:
+                return sunrise
+
+            else:
+                return initial_anticipation
+
+        elif method >= 5:
+            subtract_factor = [4, 3, 2]
+            return time_source_found - 3600 * subtract_factor[days_of_experience - 1] * (
+                        time_source_found - sunrise) / (sunset - sunrise)
+
+
+        else:
+            return -1
 
 
     def search(self, destination, search_area):
@@ -197,8 +231,16 @@ class ForagerBeeAgent(mesa.Agent):
             self.move_bee_with_angle(angle, SEARCHING_SPEED)
 
 
-
     def move_bee_towards_point(self, destination, speed):
+
+        """
+        Moves a bee agent towards a point. On tick in this model equals one second in ==> The distance the bee travels
+        equals her speed in m/s
+
+        :param destination: the position the bee travels towards
+        :param speed: the flight speed of the bee
+        """
+
         if self.model.grid.out_of_bounds(destination):
             raise ValueError("Destination out of bounds")
 
@@ -221,6 +263,15 @@ class ForagerBeeAgent(mesa.Agent):
 
 
     def move_bee_with_angle(self, angle, speed):
+        """
+        Moving a bee on the grid with a certain angle and a certain speed. Each direction on the grid can be represented
+        by a number between 0 and 2 * pi
+
+        :param angle: the angle representing the direction of the bee
+        :param speed: the flight speed of the bee
+        :return:
+        """
+
         if not 0 <= angle <= math.pi * 2:
             raise ValueError("Angle out of range")
 
@@ -233,15 +284,41 @@ class ForagerBeeAgent(mesa.Agent):
 
 
     def last_move_crossed_flower_radius(self, last_angle, speed):
+        """
+        If the bee crosses the radius in which she's able to see the flower between to tick, but she still ends
+        up outside the circle, we assume she saw the flower when she crossed the circle ==> the bee is placed on the
+        flower. Here we check if the bee crossed the circle during the last time step
+
+        :param last_angle: the last flying direction of the bee
+        :param speed: the bees flying speed
+        :return: boolean if the bee crossed the flower radius or not
+        """
+
         curr_x, curr_y = self.accurate_position
         last_x = self.accurate_position[0] - speed * math.cos(last_angle)
         last_y = self.accurate_position[1] - speed * math.sin(last_angle)
 
         return circle_line_intersect((last_x, last_y), (curr_x, curr_y), self.model.flower_location, MAX_SIGHT)
 
+    def load_nectar(self, flower):
+        if self.remaining_time_in_state > 0:
+            self.remaining_time_in_state -= 1
 
+        else:
+            C = self.model.sucrose_concentration
+            self.sucrose_load += NECTAR_REWARD * C
+            flower.sucrose_stock -= NECTAR_REWARD * C
+
+    # todo: how long does unloading take?
+    def unload_nectar(self):
+        return
+    
     def update_status(self):
-        if self.status is BeeStatus.FLYING_OUT and self.accurate_position is self.targeted_position:
+        """
+        Updates the current status of the bee after each time step
+        """
+
+        if self.status is BeeStatus.FLYING_TO_SEARCH_AREA and self.accurate_position is self.targeted_position:
             self.status = BeeStatus.SEARCHING_ADVERTISED_SOURCE
 
         elif self.status is BeeStatus.SEARCHING_ADVERTISED_SOURCE and self.accurate_position is self.model.flower_location:
@@ -253,9 +330,13 @@ class ForagerBeeAgent(mesa.Agent):
 
 
     def step(self):
+        """
+        Step function of the bee
+        """
+
         self.update_status()
 
-        if self.status is BeeStatus.FLYING_OUT:
+        if self.status is BeeStatus.FLYING_TO_SEARCH_AREA:
             self.move_bee_towards_point(self.targeted_position, FLYING_SPEED)
 
         elif self.status is BeeStatus.SEARCHING_ADVERTISED_SOURCE:
@@ -288,7 +369,13 @@ class BeeGrid(mesa.space.MultiGrid):
 
 
     def is_close_to_border(self, point):
-        x,y = point
+        """
+        checks if a position on the grid is too close to the border of the grid
+
+        :param point: location to be tested in tuple format
+        :return: boolean if the position on the grid is too close to the border of the grid
+        """
+        x, y = point
         return x < MIN_BORDER_DISTANCE or x > self.width - MIN_BORDER_DISTANCE or y < MIN_BORDER_DISTANCE or y > self.height - MIN_BORDER_DISTANCE
 
 
@@ -309,8 +396,8 @@ class BeeGrid(mesa.space.MultiGrid):
                     print("_", end="")
         print()
 
-
-
+    def get_all_dancing_bees(self):
+        return [bee for bee in self.get_cell_list_contents([self.dance_floor]) if isinstance(bee, ForagerBeeAgent) and bee.BeeStatus is BeeStatus.DANCING]
 
 
 class BeeForagingModel(mesa.Model):
@@ -325,7 +412,7 @@ class BeeForagingModel(mesa.Model):
 
 
     """
-    def __init__(self, source_distance):
+    def __init__(self, source_distance, sucrose_concentration=1):
         super().__init__()
 
         # create schedule
@@ -340,21 +427,22 @@ class BeeForagingModel(mesa.Model):
         self.schedule.add(flower)
         self.flower_location = generate_random_point(self.grid.hive[0], self.grid.hive[1], source_distance, 0.01)
 
+        #initialize all simulations specific variables that are passed as command line arguments
+        self.sucrose_concentration = sucrose_concentration
 
-
-
+        #variables for collecting results and scores
+        self.collected_sucrose_rewards = 0.0
 
 ### model functions ###
-
-
 def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1, max_attempts=10000):
     """
+    Generate a random point on the grid with a given distance to a given point (the hive in our model)
 
-    :param origin_x:
-    :param origin_y:
-    :param target_distance:
-    :param tolerance:
-    :param max_attempts:
+    :param origin_x: x coordinate of the given point
+    :param origin_y: y coordinate of the given point
+    :param target_distance: the distance between the given point and the new point
+    :param tolerance: max difference between the desired and actual distance between the given point and the new point
+    :param max_attempts: max number of attempts to find a point on the grid that fulfills all criteria (to prevent an infinity loop)
     :return:
     """
     for _ in range(max_attempts):
@@ -373,7 +461,6 @@ def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1, ma
         if x >= 0 and y >= 0:
             return int(round(x, 2)), int(round(y, 2))
 
-
 def get_next_point(current_x, current_y, angle, distance):
     """
         Returns the next point given a start point, direction(angle) and distance
@@ -388,15 +475,11 @@ def get_next_point(current_x, current_y, angle, distance):
     y_next = current_y + distance * math.sin(angle)
     return round(x_next, 2), round(y_next, 2)
 
-
-
 def get_distance(pos1, pos2):
     """
-        Uses euclidian distance
+        Use euclidian distance to calculate the distance between two points
     """
     return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
-
-
 
 def get_angle(starting_point, destination_point):
     """
@@ -413,9 +496,18 @@ def get_angle(starting_point, destination_point):
 
     return normalize_angle(angle)
 
-
-
 def random_deviate_angle(current_angle, mean, standard_deviation, min_value, max_value, radians=False):
+    """
+    Alters a given angle by a randomly drawn value
+
+    :param current_angle:
+    :param mean:
+    :param standard_deviation:
+    :param min_value:
+    :param max_value:
+    :param radians:
+    :return:
+    """
     deviation = draw_normal_distributed_value(mean, standard_deviation, min_value, max_value)
 
     if not radians:
@@ -429,7 +521,6 @@ def random_deviate_angle(current_angle, mean, standard_deviation, min_value, max
 
     return current_angle
 
-
 def random_deviate_angle_equally(angle, min_value, max_value, radians=False):
     deviation = random.uniform(min_value, max_value)
 
@@ -441,7 +532,6 @@ def random_deviate_angle_equally(angle, min_value, max_value, radians=False):
 
     return normalize_angle(angle)
 
-
 def normalize_angle(current_angle):
     angle = current_angle % (2 * math.pi)
 
@@ -452,7 +542,6 @@ def normalize_angle(current_angle):
 
 def radians_to_degrees(radians):
     return radians * (180 / math.pi)
-
 
 def circle_line_intersect(p1, p2, circle_center, radius):
     # Extract coordinates
@@ -497,15 +586,11 @@ def circle_line_intersect(p1, p2, circle_center, radius):
     # Compare with radius
     return distance <= radius
 
-
-
 def draw_normal_distributed_value(mean, standard_deviation, min_value, max_value):
     while True:
         value = random.normalvariate(mean, standard_deviation)
         if min_value <= value <= max_value:
             return value
-
-
 
 def run_bee_model_instance(params):
 
@@ -515,7 +600,7 @@ def run_bee_model_instance(params):
 
     for k in range(int(foragers)):
         bee_agent = ForagerBeeAgent(k, model_instance, BeeForagerType.PERSISTENT, 1, model_instance.grid.hive)
-        bee_agent.status = BeeStatus.FLYING_OUT
+        bee_agent.status = BeeStatus.FLYING_TO_SEARCH_AREA
         model_instance.schedule.add(bee_agent)
 
         inc_X = random.randint(-35,35)
@@ -537,8 +622,8 @@ def run_bee_model_instance(params):
 
         for forager in model_instance.schedule.agents:
             if isinstance(forager, ForagerBeeAgent):
-                if forager.status == BeeStatus.FLYING_OUT or forager.status == BeeStatus.SEARCHING_ADVERTISED_SOURCE:
-                    forager.status = BeeStatus.FLYING_OUT
+                if forager.status == BeeStatus.FLYING_TO_SEARCH_AREA or forager.status == BeeStatus.SEARCHING_ADVERTISED_SOURCE:
+                    forager.status = BeeStatus.FLYING_TO_SEARCH_AREA
                     forager.accurate_position = model_instance.grid.hive
 
         for _ in range(960):
@@ -558,7 +643,6 @@ def run_bee_model_instance(params):
 
     return found_at_day
 
-
 def parallel_run(num_processes, num_iterations, params):
     # Create a list of parameter tuples for each iteration
     param_list = [params for _ in range(num_iterations)]
@@ -568,11 +652,6 @@ def parallel_run(num_processes, num_iterations, params):
 
     return results
 
-
-
-
-
-
 def __main__(args):
     model_instance = BeeForagingModel(900)
     svg_string = ""
@@ -581,7 +660,7 @@ def __main__(args):
 
     for _ in range(1):
         forager = ForagerBeeAgent(_, model_instance, BeeForagerType.PERSISTENT, 1, model_instance.grid.hive)
-        forager.status = BeeStatus.FLYING_OUT
+        forager.status = BeeStatus.FLYING_TO_SEARCH_AREA
         forager.targeted_position = (model_instance.flower_location[0] + random.randint(-35,35), model_instance.flower_location[1] + random.randint(-35,35))
         model_instance.grid.place_agent(forager, model_instance.grid.hive)
         model_instance.schedule.add(forager)
