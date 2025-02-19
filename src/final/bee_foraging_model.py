@@ -66,17 +66,6 @@ class Bloom(Enum):
     OPEN = True,
     CLOSED = False
 
-#todo: will probably be replaced/removed later (experience status might be retrievable from days known variable)
-#bee forager experienced status
-class BeeForagerExperienceStatus(Enum):
-    EXPERIENCED_FORAGER = 1,
-    NEW_FORAGER = 2,
-
-#bee forager type
-class BeeForagerType(Enum):
-    PERSISTENT = 1,
-    RETICENT = 2,
-
 #bee status
 class BeeStatus(Enum):
     RESTING = 1,
@@ -131,7 +120,6 @@ class ForagerBeeAgent(mesa.Agent):
             bee_id (int): unique id of the bee agent
             bee_model (mesa.Model): model where the bee agent is placed
             days_of_experience (int): number of days of experience
-            forager_type (BeeForagerType): type of bee agent
             start_pos ((float, float)): starting position of the bee agent
 
         Variables:
@@ -139,10 +127,9 @@ class ForagerBeeAgent(mesa.Agent):
             last_angle (float): flying angle of the bee agent at the last step
 
     """
-    def __init__(self, bee_id, bee_model, forager_type, days_of_experience,  start_pos, time_source_found=-1):
+    def __init__(self, bee_id, bee_model, days_of_experience,  start_pos, time_source_found=-1):
         super().__init__(bee_id, bee_model)
 
-        self.forager_type = forager_type
         self.days_of_experience = days_of_experience
         self.accurate_position = start_pos
         self.status = BeeStatus.RESTING
@@ -412,7 +399,7 @@ class BeeForagingModel(mesa.Model):
 
 
     """
-    def __init__(self, source_distance, sucrose_concentration=1):
+    def __init__(self, source_distance, number_of_starting_agents, sucrose_concentration=1):
         super().__init__()
 
         # create schedule
@@ -432,6 +419,12 @@ class BeeForagingModel(mesa.Model):
 
         #variables for collecting results and scores
         self.collected_sucrose_rewards = 0.0
+
+
+        # add the desired number of Bee Agents to the grid
+        for i in range(number_of_starting_agents):
+            bee_agent = ForagerBeeAgent(i, self, 0, (self.grid.hive[0], self.grid.hive[1]))
+            self.schedule.add(bee_agent)
 
 ### model functions ###
 def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1, max_attempts=10000):
@@ -592,6 +585,12 @@ def draw_normal_distributed_value(mean, standard_deviation, min_value, max_value
         if min_value <= value <= max_value:
             return value
 
+def start_simulation(model):
+    for bee_agent in [agent for agent in model.agents if isinstance(agent, ForagerBeeAgent)]:
+        bee_agent.status = BeeStatus.FLYING_TO_SEARCH_AREA
+        
+
+
 def run_bee_model_instance(params):
 
     distance, foragers, sd = params
@@ -599,7 +598,7 @@ def run_bee_model_instance(params):
     model_instance = BeeForagingModel(int(distance))
 
     for k in range(int(foragers)):
-        bee_agent = ForagerBeeAgent(k, model_instance, BeeForagerType.PERSISTENT, 1, model_instance.grid.hive)
+        bee_agent = ForagerBeeAgent(k, model_instance, 1, model_instance.grid.hive)
         bee_agent.status = BeeStatus.FLYING_TO_SEARCH_AREA
         model_instance.schedule.add(bee_agent)
 
@@ -653,67 +652,8 @@ def parallel_run(num_processes, num_iterations, params):
     return results
 
 def __main__(args):
-    model_instance = BeeForagingModel(900)
-    svg_string = ""
-    bee = None
+    model = BeeForagingModel(900, 50)
 
-
-    for _ in range(1):
-        forager = ForagerBeeAgent(_, model_instance, BeeForagerType.PERSISTENT, 1, model_instance.grid.hive)
-        forager.status = BeeStatus.FLYING_TO_SEARCH_AREA
-        forager.targeted_position = (model_instance.flower_location[0] + random.randint(-35,35), model_instance.flower_location[1] + random.randint(-35,35))
-        model_instance.grid.place_agent(forager, model_instance.grid.hive)
-        model_instance.schedule.add(forager)
-        bee = forager
-
-    svg_string += "M" + str(model_instance.grid.hive[0])+","+str(model_instance.grid.hive[1])+" "
-    for step in range(960):
-        model_instance.schedule.step()
-        for forager in model_instance.schedule.agents:
-            if isinstance(forager, ForagerBeeAgent) and forager.unique_id == 0:
-                x = forager.accurate_position[0]
-                y = forager.accurate_position[1]
-                x = int(x*100) / 100.0
-                y = int(y*100) / 100.0
-
-
-                svg_string += "L"+str(x)+","+str(y)+" "
-
-
-
-    file_string = ""
-    with open("/home/valentin-rexer/uni/UofM/abm_files/sample.svg", 'r') as sample:
-        for line in sample:
-            file_string += line
-
-    file_string += svg_string + '"'
-
-
-
-    file_string += """
-         fill="none"
-          stroke="#2563eb"
-          stroke-width="0.5"
-          stroke-linecap="round"
-          stroke-linejoin="round" />
-    """
-
-    file_string += "\n<!-- Dots -->\n"
-
-    # Add circles with variables
-    file_string += f'<circle cx="{model_instance.flower_location[0]}" cy="{model_instance.flower_location[1]}" r="{1}" fill="#4CAF50" /> <!-- Circle -->\n'
-    file_string += f'\n<circle cx="{forager.targeted_position[0]}" cy="{forager.targeted_position[1]}" r="{MAX_SEARCH_RADIUS}" fill="none" stroke="#4CAF50" stroke-width="{0.3}" />\n'
-
-    file_string += "\n</svg>"
-
-    with open("/home/valentin-rexer/uni/UofM/abm_files/final.svg", "w") as final:
-        final.write(file_string)
-
-    print("flower")
-    print(model_instance.flower_location)
-
-    if bee.accurate_position is model_instance.flower_location:
-        print("ounf")
 
 if __name__ == '__main__':
     __main__(sys.argv)
