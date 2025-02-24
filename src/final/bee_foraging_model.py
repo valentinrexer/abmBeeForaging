@@ -79,12 +79,11 @@ class BeeStatus(Enum):
     FLYING_STRAIGHT_TO_FLOWER = 11,
     PREPARING_TO_FLY_OUT = 12,
 
-#foraging strategy
+
 class ForagingStrategy(Enum):
-    STRATEGY_1 = 1,
-    STRATEGY_10 = 2,
-    STRATEGY_100 = 3,
-    STRATEGY_40_60_80 = 4,
+    PERSISTENT = 1,
+    RETICENT = 2,
+    
 
 # definition of the Flower Class
 class FlowerAgent(mesa.Agent):
@@ -227,7 +226,6 @@ class ForagerBeeAgent(mesa.Agent):
         else:
             angle = random_deviate_angle(self.last_angle, MEAN, STANDARD_DEVIATION, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
             self.move_bee_with_angle(angle, SEARCHING_SPEED)
-
 
     def move_bee_towards_point(self, destination, speed):
 
