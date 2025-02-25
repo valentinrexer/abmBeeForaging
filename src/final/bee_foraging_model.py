@@ -15,12 +15,12 @@ import multiprocessing as mp
 #packages for data analysis
 import pandas as pd
 import numpy as np
-
+from ipyvuetify import StepperStep
 
 ### definition of fixed global variables ###
 SUNRISE = 7 * 3600 # tick when the sun rises
 SUNSET = 19 * 3600 # tick when the sun sets
-TICKS_PER_DAY = 24 * 3600 # amount of ticks in a full day
+STEPS_PER_DAY = 24 * 3600 # amount of ticks in a full day
 NUMBER_OF_DAYS = 5 # number of simulated days per simulation
 
 RESTING_ENERGY_COST = 6.2 #mW
@@ -83,7 +83,7 @@ class BeeStatus(Enum):
 class ForagingStrategy(Enum):
     PERSISTENT = 1,
     RETICENT = 2,
-    
+
 
 # definition of the Flower Class
 class FlowerAgent(mesa.Agent):
@@ -114,10 +114,10 @@ class FlowerAgent(mesa.Agent):
 
 
     def step(self):
-        if self.model.steps == self.open_time % TICKS_PER_DAY:
+        if self.model.steps == self.open_time % STEPS_PER_DAY:
             self.bloom_state = Bloom.OPEN
 
-        if self.model.steps == self.close_time % TICKS_PER_DAY:
+        if self.model.steps == self.close_time % STEPS_PER_DAY:
             self.bloom_state = Bloom.CLOSED
 
 class ForagerBeeAgent(mesa.Agent):
@@ -135,7 +135,7 @@ class ForagerBeeAgent(mesa.Agent):
             last_angle (float): flying angle of the bee agent at the last step
 
     """
-    def __init__(self, bee_model, days_of_experience, start_pos, discovery_time, time_source_found=-1):
+    def __init__(self, bee_model, days_of_experience, start_pos, time_source_found=-1):
         super().__init__(bee_model)
 
         self.days_of_experience = days_of_experience
@@ -143,9 +143,10 @@ class ForagerBeeAgent(mesa.Agent):
         self.status = BeeStatus.RESTING
         self.remaining_time_in_state = 0
         self.time_source_found = time_source_found
+        self.next_anticipation = -1
+        self.foraging_strategy = None
 
         self.targeted_flower = None
-        self.discovery_time = discovery_time
         self.last_angle = 0.0
         self.search_area_center = None
         self.currently_watched_bee = None
@@ -155,55 +156,32 @@ class ForagerBeeAgent(mesa.Agent):
 
 
 
-    #todo: include energy loss function
 
-    def anticipation(self, method, time_source_found, days_of_experience, sunrise, sunset):
+    def anticipation(self, method , sunrise, sunset):
         """
         Simulating the bees anticipation behaviour based on her experience
 
         :param method: Anticipation method
-        :param time_source_found: time that the bee found the source
-        :param days_of_experience: Days passed since the bee found the source
         :param sunrise: sunrise time for this simulation
         :param sunset: sunset time for this simulation
-        :return: anticipated time for soucre
+        :return: anticipated time for source
         """
+        time_source_found = self.time_source_found
+        distance = get_distance(self.targeted_flower.location, self.model.grid.hive)
 
         if not sunrise <= time_source_found <= sunset:
             warnings.warn("Invalid argument for time_source_found")
 
         if method == 1:
-            return time_source_found
+            return time_source_found - distance/FLYING_SPEED
 
         elif method == 2:
 
-            return time_source_found - 3600 * 4 * (time_source_found - sunrise) / (sunset - sunrise)
-
-        elif method == 3 or method == 4:
-
-            subtract_anticipation = [3600 * 2, 3600 * 1.5, 3600]
-            initial_anticipation = time_source_found - subtract_anticipation[days_of_experience - 1]
-
-            if method == 4:
-                initial_anticipation -= subtract_anticipation[days_of_experience - 1]
-
-            if initial_anticipation < sunrise:
-                return sunrise
-
-            else:
-                return initial_anticipation
-
-        elif method == 5:
-            subtract_factor = [4, 3, 2]
-            return time_source_found - 3600 * subtract_factor[days_of_experience - 1] * (
-                        time_source_found - sunrise) / (sunset - sunrise)
-
+            return (time_source_found - 3600 * 4 * (time_source_found - sunrise) / (sunset - sunrise)) - distance/FLYING_SPEED
 
         else:
             return -1
 
-
-    #todo: adjust method so destination is flower now
     def search(self, flower, search_area):
         """
         Models the bee search behaviour
@@ -255,9 +233,6 @@ class ForagerBeeAgent(mesa.Agent):
                 self.model.grid.move_agent(self, (int(new_pos[0]), int(new_pos[1])))
                 self.last_angle = angle
 
-
-
-
     def move_bee_with_angle(self, angle, speed):
         """
         Moving a bee on the grid with a certain angle and a certain speed. Each direction on the grid can be represented
@@ -277,7 +252,6 @@ class ForagerBeeAgent(mesa.Agent):
             self.accurate_position = new_pos
             self.model.grid.move_agent(self, (int(new_pos[0]), int(new_pos[1])))
             self.last_angle = angle
-
 
     def last_move_crossed_flower_radius(self, last_angle, speed, flower):
         """
@@ -319,7 +293,7 @@ class ForagerBeeAgent(mesa.Agent):
         """
 
         if self.status is BeeStatus.RESTING:
-            
+            pass
 
         elif self.status is BeeStatus.FLYING_TO_SEARCH_AREA and self.accurate_position is self.targeted_flower.location:
             self.status = BeeStatus.SEARCHING_ADVERTISED_SOURCE
@@ -416,13 +390,17 @@ class BeeForagingModel(mesa.Model):
 
 
     """
-    def __init__(self, source_distance, number_of_starting_agents, sucrose_concentration=1):
+    def __init__(self, source_distance, number_of_starting_bees, sucrose_concentration=1):
         super().__init__()
+
+        # initialize model_information
+        self.number_of_starting_bees = number_of_starting_bees
+        self.sucrose_concentration = sucrose_concentration
 
         self.agents.do("step")
         self.agents.do("advance")
 
-        # create grid ==> grid will have a size of source_distance + 70
+        # create grid ==> grid will have a size of source_distance + 70 in both directions
         self.grid = BeeGrid((source_distance + 70) * 2)
 
         #create flower (food source) and place it on the grid
@@ -441,8 +419,8 @@ class BeeForagingModel(mesa.Model):
 
 
         # add the desired number of Bee Agents to the grid
-        for i in range(number_of_starting_agents):
-            bee_agent = ForagerBeeAgent(self, 0, (self.grid.hive[0], self.grid.hive[1]), random.randint(flower.open_time, flower.close_time))
+        for i in range(number_of_starting_bees):
+            bee_agent = ForagerBeeAgent(self, 1, (self.grid.hive[0], self.grid.hive[1]), time_source_found=random.randint(flower.open_time, flower.close_time))
             self.agents.add(bee_agent)
 
 
@@ -468,6 +446,51 @@ class BeeForagingModel(mesa.Model):
 
     def get_flowers(self):
         return [flower for flower in self.agents if isinstance(flower, FlowerAgent)]
+
+    def get_current_day(self):
+        return (self.steps // STEPS_PER_DAY) + 1
+
+    def update_bee_foraging_strategies(self):
+        self.reassign_foraging_strategies(1, 40)
+        self.reassign_foraging_strategies(2, 60)
+        self.reassign_foraging_strategies(3, 80)
+        self.reassign_foraging_strategies(4, 90)
+        self.reassign_foraging_strategies(5, 95)
+
+
+    def reassign_foraging_strategies(self, days_of_experience, persistent_percentage):
+        bees = [bee for bee in self.agents if isinstance(bee, ForagerBeeAgent) and bee.days_of_experience == days_of_experience]
+        bee_groups = split_agents_by_percentage(bees, persistent_percentage)
+
+        for bee in bee_groups[0]:
+            bee.foraging_strategy = ForagingStrategy.PERSISTENT
+
+        for bee in bee_groups[1]:
+            bee.foraging_strategy = ForagingStrategy.RETICENT
+
+
+    def add_new_foragers(self, number_of_new_foragers):
+        for _ in range(number_of_new_foragers):
+            new_bee_agent = ForagerBeeAgent(self, 0, (self.grid.hive[0], self.grid.hive[1]))
+            new_bee_agent.next_anticipation = SUNRISE + (self.get_current_day() - 1) * STEPS_PER_DAY
+            self.agents.add(new_bee_agent)
+
+    def kill_agents(self, percentage = 0.2):
+        # Get all bee agents
+        bee_agents = [agent for agent in self.agents if isinstance(agent, ForagerBeeAgent)]
+
+        # Calculate how many to kill
+        num_to_kill = int(len(bee_agents) * percentage)
+
+        # Select which bees to kill randomly
+        bees_to_kill = random.sample(bee_agents, num_to_kill)
+
+        # Remove these bees from the model
+        for bee in bees_to_kill:
+            self.agents.remove(bee)
+
+
+
 
 ### model functions ###
 def generate_random_point(origin_x, origin_y, target_distance, tolerance=0.1, max_attempts=10000):
@@ -628,6 +651,43 @@ def draw_normal_distributed_value(mean, standard_deviation, min_value, max_value
         if min_value <= value <= max_value:
             return value
 
+def get_day_of_step(step):
+    return (step // STEPS_PER_DAY) + 1
+
+
+def split_agents_by_percentage(agents, first_percentage=30):
+    """
+    Split agents of a specific class into two groups randomly based on a percentage split.
+
+    Args:
+        model: The Mesa model instance containing agents
+        agent_class: The class of agents to filter and split (e.g., ForagerBeeAgent)
+        first_percentage (int): Percentage of agents to include in the first group (0-100)
+                               The second group gets (100 - first_percentage)
+
+    Returns:
+        tuple: A tuple containing (first_group_agents, second_group_agents)
+    """
+
+    if not agents:
+        return [], []
+
+    # Ensure percentage is within bounds
+    first_percentage = max(0, min(100, first_percentage))
+
+    # Calculate how many agents go in the first group
+    num_in_first = int(len(agents) * (first_percentage / 100))
+
+    # Create a copy and shuffle it
+    shuffled_agents = agents.copy()
+    random.shuffle(shuffled_agents)
+
+    # Split the shuffled agents
+    first_group = shuffled_agents[:num_in_first]
+    second_group = shuffled_agents[num_in_first:]
+
+    return first_group, second_group
+
 def start_simulation(model):
     for bee_agent in [agent for agent in model.agents if isinstance(agent, ForagerBeeAgent)]:
         bee_agent.status = BeeStatus.FLYING_TO_SEARCH_AREA
@@ -695,7 +755,25 @@ def parallel_run(num_processes, num_iterations, params):
     return results
 
 def __main__(args):
-    model = BeeForagingModel(900, 50)
+    model = BeeForagingModel(900, 100)
+    model.update_bee_foraging_strategies()
+
+    c_pers = 0
+    c_ret = 0
+
+    for bee in model.agents:
+        if isinstance(bee, ForagerBeeAgent):
+            match bee.foraging_strategy:
+                case ForagingStrategy.PERSISTENT:
+                    c_pers += 1
+
+                case ForagingStrategy.RETICENT:
+                    c_ret += 1
+
+
+    print(c_pers, c_ret)
+
+
 
 
 if __name__ == '__main__':
