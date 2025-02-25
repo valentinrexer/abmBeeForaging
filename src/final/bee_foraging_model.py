@@ -15,7 +15,6 @@ import multiprocessing as mp
 #packages for data analysis
 import pandas as pd
 import numpy as np
-from ipyvuetify import StepperStep
 
 ### definition of fixed global variables ###
 SUNRISE = 7 * 3600 # tick when the sun rises
