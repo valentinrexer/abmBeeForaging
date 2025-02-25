@@ -28,7 +28,7 @@ def anticipation(method, time_source_found, days_of_experience, sunrise, sunset)
         else:
             return initial_anticipation
 
-    elif method == 5:
+    elif method >= 5:
         subtract_factor = [4, 3, 2]
         return time_source_found - 3600 * subtract_factor[days_of_experience-1] * (time_source_found - sunrise) / (sunset - sunrise)
 
