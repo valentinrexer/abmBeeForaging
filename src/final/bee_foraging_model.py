@@ -35,6 +35,8 @@ MAX_SEARCH_TIME = 960 #s [or ticks]
 MAX_DANCE_ERROR = 30 #m
 
 NECTAR_REWARD = 353.8 #*C J
+MORTALITY_RATE = 2.3 * 10 ** (-6)
+
 
 
 ### definition of model specific parameters ###
