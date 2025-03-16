@@ -1,8 +1,10 @@
 import random
 
-from src.final.bee_foraging_model import STEPS_PER_DAY
+prob = 2.3 * 10 ** (-6)
+
+def day_of_time_step(step, steps_per_day):
+    return step // steps_per_day
 
 
 
-
-print(random.randint(30000+STEPS_PER_DAY, (40000 % STEPS_PER_DAY) + (2 * STEPS_PER_DAY)))
+print(222586 % 86400)
