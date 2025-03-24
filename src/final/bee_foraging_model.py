@@ -2,6 +2,7 @@
 import math
 import sys
 import warnings
+from functools import cached_property
 from typing import Tuple
 
 import mesa
@@ -12,17 +13,17 @@ import random
 
 #packages for multicore processing
 import multiprocessing as mp
+import itertools
 
 #packages for data analysis
+import csv
 import pandas as pd
 import numpy as np
 from pandas.core.roperator import rand_
 
 ### definition of fixed global variables ###
-SUNRISE = 7 * 3600 # tick when the sun rises
-SUNSET = 19 * 3600 # tick when the sun sets
 STEPS_PER_DAY = 24 * 3600 # amount of ticks in a full day
-NUMBER_OF_DAYS = 5 # number of simulated days per simulation
+MAX_POST_COLLECTION_CLUSTERING_TIME = 4.5 * 3600
 
 RESTING_ENERGY_COST = 6.2 * (1.0/1000) #mJ/s
 UNLOADING_NECTAR_ENERGY_COST = 9.3 * (1.0/1000) #mJ/s
@@ -33,7 +34,6 @@ SEARCHING_SPEED = FLYING_SPEED / 3 #m/s
 SEARCHING_ANGLE_RANGE = (-120.0, 120.0) #°
 
 MAX_SEARCH_TIME = 960 #s [or ticks]
-MAX_DANCE_ERROR = 30 #m
 
 NECTAR_REWARD = 353.8 #*C J
 MORTALITY_RATE = 7.7 * 10 ** (-7)
@@ -44,14 +44,9 @@ MAX_SIGHT = 1
 MIN_BORDER_DISTANCE = 3
 MAX_SEARCH_RADIUS = 50  #m max radius in which bee looks for the source
 
-
 ### definition of normal distribution variables for random drawing ###
 MEAN = 0
 STANDARD_DEVIATION = 35
-
-
-### definition of global attributes ###
-ANTICIPATION_METHOD = 2
 
 #flower colors
 class Color(Enum):
@@ -82,13 +77,9 @@ class BeeState(Enum):
     FLYING_STRAIGHT_TO_FLOWER = 11,
     DAY_SKIPPING = 12,
 
-
-
-
 class ForagingStrategy(Enum):
     PERSISTENT = 1,
     RETICENT = 2,
-
 
 class BeeForagingModel(mesa.Model):
     """
@@ -97,7 +88,12 @@ class BeeForagingModel(mesa.Model):
 
     def __init__(self, source_distance : int,
                  number_of_starting_bees : int,
-                 sucrose_concentration : float = 1.0) -> None:
+                 sucrose_concentration : float = 1.0,
+                 sunrise : int = 7 * 3600,
+                 sunset : int = 19 * 3600,
+                 anticipation_method : int = 1,
+                 flower_open : int = 9 * 3600,
+                 flower_closed : int = 14 * 3600) -> None:
         """
         Initializes the BeeForagingModel instance
 
@@ -107,9 +103,12 @@ class BeeForagingModel(mesa.Model):
         """
         super().__init__()
 
-        # initialize model_information
+        self.sunrise = sunrise  # tick when the sun rises
+        self.sunset = sunset  # tick when the sun sets
+        self.anticipation_method = anticipation_method
         self.number_of_starting_bees = number_of_starting_bees
         self.sucrose_concentration = sucrose_concentration
+
         self.total_energy = 0   # this is the final output for our model
 
         # create a simulated grid
@@ -118,13 +117,9 @@ class BeeForagingModel(mesa.Model):
         self.dance_floor = (self.hive[0] + 1, self.hive[1])
 
         # create flower (food source) and place it on the grid
-        # todo: in the future automize generation of multiple flowers
         flower_location = generate_random_point(self.hive[0], self.hive[1], source_distance, 0.01)
-        flower = FlowerAgent(self, flower_location, 1000, 9 * 3600, 14 * 3600, sucrose_concentration)
+        flower = FlowerAgent(self, flower_location, 1000, flower_open, flower_closed, sucrose_concentration)
         self.agents.add(flower)
-
-        # variables for collecting results and scores
-        self.collected_sucrose_rewards = 0.0
 
         # add the desired number of Bee Agents to the grid
         # The foragers come with one day of experience already and randomly assigned anticipation times
@@ -133,8 +128,10 @@ class BeeForagingModel(mesa.Model):
                                         (self.hive[0], self.hive[1]),
                                         time_source_found=random.randint(flower.open_time, flower.close_time))
             bee_agent.targeted_flower = flower
-            bee_agent.next_anticipation_time = bee_agent.anticipation(1, SUNRISE, SUNSET)
-            bee_agent.last_collection_time = random.randint(bee_agent.time_source_found, flower.close_time)
+            bee_agent.next_anticipation_time = bee_agent.anticipation(1, self.sunrise, self.sunset)
+            C = self.sucrose_concentration
+            bee_agent.last_collection_time = random.randint(flower.close_time - (random.randint(0,
+                                                                                                int(2 * flower.flight_duration) + int(random.uniform(39 * (C ** 2) + 114.1 * C - 64.25, 159 * (C ** 2) - 140 * C + 166)))), flower.close_time)
             bee_agent.collection_times.append(bee_agent.last_collection_time)
             self.agents.add(bee_agent)
 
@@ -187,7 +184,8 @@ class BeeForagingModel(mesa.Model):
         """
         return [bee for bee in self.get_bees() if bee.accurate_position == self.dance_floor]
 
-    def get_flowers(self) -> list:
+    @cached_property
+    def flowers(self) -> list:
         """
         Returns all flower agents of the model
 
@@ -195,7 +193,8 @@ class BeeForagingModel(mesa.Model):
         """
         return [flower for flower in self.agents if isinstance(flower, FlowerAgent)]
 
-    def get_current_day(self) -> int:
+    @property
+    def current_day(self) -> int:
         """
         Returns the current day of the simulation
 
@@ -280,7 +279,7 @@ class BeeForagingModel(mesa.Model):
 
         for _ in range(number_of_new_foragers):
             new_bee_agent = ForagerBeeAgent(self, 0, (self.hive[0], self.hive[1]))
-            new_bee_agent.next_anticipation_time = SUNRISE + self.get_current_day() * STEPS_PER_DAY
+            new_bee_agent.next_anticipation_time = self.sunrise + self.current_day * STEPS_PER_DAY
             new_bee_agent.foraging_strategy = ForagingStrategy.RETICENT
             self.agents.add(new_bee_agent)
 
@@ -304,14 +303,17 @@ class BeeForagingModel(mesa.Model):
         for bee in bees_to_kill:
             self.agents.remove(bee)
 
-    def today(self, time : int) -> int:
+    def today(self, time : int | float) -> int:
         """
         Returns what time step is the same time on the current day as a provided timestep on an arbitrary day
 
         :param time: time step to be converted into today's time step
         :return: integer determining today's equivalent step
         """
-        return time % STEPS_PER_DAY + self.get_current_day() * STEPS_PER_DAY
+        if not isinstance(time, int):
+            time = int(time)
+
+        return time % STEPS_PER_DAY + self.current_day * STEPS_PER_DAY
 
     def daily_update(self) -> None:
         """
@@ -340,8 +342,6 @@ class BeeForagingModel(mesa.Model):
         if not self.steps == 2 and self.steps % STEPS_PER_DAY == 2:
             self.daily_update()
 
-#todo: make sucrose stock accessible for bees (make it infinite)
-# definition of the Flower Class
 class FlowerAgent(mesa.Agent):
     """
     Models a flower/food source in the model
@@ -378,16 +378,24 @@ class FlowerAgent(mesa.Agent):
         self.open_time = int(open_time)   # tick/step when the flower opens ==> bee can access the flower
         self.close_time = int(close_time)   # tick/step when the flower closes ==> no bee can access the flower
         self.location = location   # location of the flower
-        self.distance_from_hive = get_distance(self.location, bee_model.hive)
         self.sucrose_concentration = sucrose_concentration
         self.visibility_radius = visibility_radius
         self.bloom_state = bloom_state
         self.color = color
-        self.flight_duration = get_distance(self.location, bee_model.hive) / FLYING_SPEED
 
+    @cached_property
+    def flight_duration(self) -> float:
+        return get_distance(self.location, self.model.hive) / FLYING_SPEED
+
+    @cached_property
+    def distance_from_hive(self):
+        return get_distance(self.location, self.model.hive)
+
+    @cached_property
+    def value(self):
         C = self.sucrose_concentration
         D = self.distance_from_hive
-        self.value = (353.6 * C - 0.015 * D - 2.64) / (0.2 * C + 0.015 * D + 2.64)
+        return (353.6 * C - 0.015 * D - 2.64) / (0.2 * C + 0.015 * D + 2.64)
 
     def step(self) -> None:
         """
@@ -399,6 +407,20 @@ class FlowerAgent(mesa.Agent):
 
         if self.model.steps % STEPS_PER_DAY == self.close_time:
             self.bloom_state = Bloom.CLOSED
+
+    def __str__(self):
+        return (
+            f"Flower at {self.location}\n"
+            f"Bloom State: {'OPEN' if self.bloom_state == Bloom.OPEN else 'CLOSED'}\n"
+            f"Color: {self.color}\n"
+            f"Opening Hours: {self.open_time} - {self.close_time}\n"
+            f"Distance from Hive: {self.distance_from_hive:.1f}m\n"
+            f"Flight Duration: {self.flight_duration:.1f} ticks\n"
+            f"Nectar Stock: {self.sucrose_stock:.1f}μl\n"
+            f"Sucrose Concentration: {self.sucrose_concentration:.0f}%\n"
+            f"Visibility Radius: {self.visibility_radius}m\n"
+            f"Value for Bees: {self.value:.2f}"
+        )
 
 class ForagerBeeAgent(mesa.Agent):
     """
@@ -422,7 +444,7 @@ class ForagerBeeAgent(mesa.Agent):
         self.days_of_experience = days_of_experience   # number of days the bee has collected food from a source
         self.accurate_position = start_pos   # current position of the bee
         self.state = BeeState.RESTING   # state of the bee
-        self.remaining_time_in_state = 0   # number of steps the bee will remain in the current state (is not necessarily assigned in each state)
+        self._remaining_time_in_state = 0   # number of steps the bee will remain in the current state (is not necessarily assigned in each state)
         self.time_source_found = time_source_found   # first time of food collection at the targeted_flower on the previous day / current day
         self.last_collection_time = None   # last time the bee found the flover open on the current or previous day
         self.next_anticipation_time = None   # next time the bee anticipates the flower to be open and clusters on the dance floor
@@ -430,11 +452,10 @@ class ForagerBeeAgent(mesa.Agent):
         self.next_reconnaissance_time = None   # determines the next reconnaissance time step for PERSISTENT foragers
         self.loaded = False   # bee has currently food loaded
         self.collection_times = []   # list of time steps when the bee collected food
-        self.mortality_probability = MORTALITY_RATE
-
+        self._mortality_probability = MORTALITY_RATE
         self.targeted_flower = None
-        self.last_angle = 0.0
-        self.search_area_center = None
+        self._last_angle = 0.0
+        self._search_area_center = None
         self.currently_watched_bee = None
         self.homing_motivation = 0
 
@@ -454,21 +475,18 @@ class ForagerBeeAgent(mesa.Agent):
             raise TypeError("bee_model must be of type BeeForagingModel")
 
         time_source_found = self.time_source_found % STEPS_PER_DAY
-
         distance = get_distance(self.targeted_flower.location, self.model.hive)
-
-
 
         if not sunrise <= time_source_found <= sunset:
             warnings.warn("Invalid argument for time_source_found")
 
         if method == 1:
-            anticipation = time_source_found - distance/FLYING_SPEED
-            return int(self.model.today(anticipation) - 4 *3600)
+            anticipation = int(time_source_found - distance/FLYING_SPEED)
+            return int(self.model.today(anticipation))
 
         elif method == 2:
             anticipation = (time_source_found - 3600 * 4 * (time_source_found - sunrise) / (sunset - sunrise)) - distance/FLYING_SPEED
-            return int(anticipation + self.model.get_current_day() * STEPS_PER_DAY)
+            return self.model.today(int(anticipation))
 
         else:
             return -1
@@ -482,18 +500,18 @@ class ForagerBeeAgent(mesa.Agent):
         :param flower: the position the bee tries to find
         :param search_area_center: a tuple that describes the area in which the bee tries to find the destination
         """
-        self.search_area_center = search_area_center
+        self._search_area_center = search_area_center
 
-        if get_distance(self.accurate_position, flower.location) <= flower.visibility_radius or self.last_move_crossed_flower_radius(self.last_angle, SEARCHING_SPEED, flower):
+        if get_distance(self.accurate_position, flower.location) <= flower.visibility_radius or self.last_move_crossed_flower_radius(self._last_angle, SEARCHING_SPEED, flower):
             self.move_bee_towards_point(flower.location, SEARCHING_SPEED)
 
-        elif get_distance(self.accurate_position, self.search_area_center) >= MAX_SEARCH_RADIUS:
-            angle = get_angle(self.accurate_position, self.search_area_center)
+        elif get_distance(self.accurate_position, self._search_area_center) >= MAX_SEARCH_RADIUS:
+            angle = get_angle(self.accurate_position, self._search_area_center)
             angle = random_deviate_angle_equally(angle, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
             self.move_bee_with_angle(angle, SEARCHING_SPEED)
 
         else:
-            angle = random_deviate_angle(self.last_angle, MEAN, STANDARD_DEVIATION, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
+            angle = random_deviate_angle(self._last_angle, MEAN, STANDARD_DEVIATION, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
             self.move_bee_with_angle(angle, SEARCHING_SPEED)
 
         self.homing_motivation += 1
@@ -518,13 +536,13 @@ class ForagerBeeAgent(mesa.Agent):
 
         if current_distance < speed:
             self.accurate_position = destination
-            self.last_angle = angle
+            self._last_angle = angle
 
         else:
             new_pos = (self.accurate_position[0] + speed * math.cos(angle), self.accurate_position[1] + speed * math.sin(angle))
             if not self.model.out_of_bounds(new_pos):
                 self.accurate_position = new_pos
-                self.last_angle = angle
+                self._last_angle = angle
 
     def move_bee_with_angle(self, angle : float, speed : float) -> None:
         """
@@ -546,7 +564,7 @@ class ForagerBeeAgent(mesa.Agent):
 
         if not self.model.out_of_bounds(new_pos):
             self.accurate_position = new_pos
-            self.last_angle = angle
+            self._last_angle = angle
 
     def last_move_crossed_flower_radius(self, last_angle : float, speed : float, flower : FlowerAgent) -> bool:
         """
@@ -569,23 +587,41 @@ class ForagerBeeAgent(mesa.Agent):
 
         return circle_line_intersect((last_x, last_y), (curr_x, curr_y), flower.location, flower.visibility_radius)
 
-    def load_nectar(self, flower : FlowerAgent) -> None:
-        if self.remaining_time_in_state > 0:
-            self.remaining_time_in_state -= 1
+    @property
+    def late_reconnaissance_probability(self) -> float:
+        """
+        Probability of late reconnaissance flight for persistent forager bees
 
-        else:
-            C = flower.sucrose_concentration
-            self.sucrose_load += NECTAR_REWARD * C
-            flower.sucrose_stock -= NECTAR_REWARD * C
+        :return: probability for bee too fly out
+        """
+
+        if len(self.collection_times) < 1:
+            return 0.0
+
+        t = self.model.steps % STEPS_PER_DAY - self.collection_times[-1]
+        return -2 * (10 ** (-16)) * (t ** 3) + 5 * (10 ** (-12)) * (t ** 2) - 5 * (10 ** (-8)) * t + 0.0002
 
     def daily_variable_reassignment(self) -> None:
-        self.next_anticipation_time = self.anticipation(ANTICIPATION_METHOD, SUNRISE, SUNSET) if self.targeted_flower is not None else self.model.today(SUNRISE)
+        """
+        Reassign all bee agent specific variables for the day on time step 1
+        """
 
-        if self.last_collection_time is not None and self.state != BeeState.DAY_SKIPPING:
-            self.days_of_experience += 1
+        if not isinstance(self.model, BeeForagingModel):
+            raise TypeError("bee_model must be of type BeeForagingModel")
 
+        # reassign the next anticipation time when the bee is going to cluster
+        self.next_anticipation_time = self.anticipation(self.model.anticipation_method, self.model.sunrise, self.model.sunset) if self.targeted_flower is not None else self.model.today(self.model.sunrise)
+
+        # if the bee has been collecting nectar on the previous day its number of days of experience is increased
+        if (self.last_collection_time is not None and
+                self.state != BeeState.DAY_SKIPPING and
+                get_day_of_step(self.last_collection_time) == self.model.current_day - 1):
+
+           self.days_of_experience += 1
+
+        # for persistent foragers the next time they will do a reconnaissance flight (if not employed before) is assigned as well
         if self.foraging_strategy == ForagingStrategy.PERSISTENT:
-            self.next_reconnaissance_time = random.randint(self.next_anticipation_time, (self.time_source_found % STEPS_PER_DAY) + (self.model.get_current_day()) * STEPS_PER_DAY)
+            self.next_reconnaissance_time = random.randint(self.next_anticipation_time, (self.time_source_found % STEPS_PER_DAY) + (self.model.current_day) * STEPS_PER_DAY)
 
         else:
             self.next_reconnaissance_time = None
@@ -597,41 +633,52 @@ class ForagerBeeAgent(mesa.Agent):
         if not isinstance(self.model, BeeForagingModel):
             raise ValueError("The bee foraging model must be a BeeForagingModel")
 
+        # on the last step of the day, the last collection time is updated
         if self.model.steps % STEPS_PER_DAY == STEPS_PER_DAY - 1:
             if len(self.collection_times)  > 0:
                 self.last_collection_time = self.collection_times[-1]
 
+        # on step 1 of each day the variables of the agents are updated
         if self.model.steps % STEPS_PER_DAY == 1:
             self.daily_variable_reassignment()
 
         if self.state == BeeState.RESTING:
+            # if anticipation time comes up the state is set to CLUSTERING
             if self.model.steps % STEPS_PER_DAY == self.next_anticipation_time % STEPS_PER_DAY:
                 self.state = BeeState.CLUSTERING
                 self.accurate_position = self.model.dance_floor
 
-
+        # bee is CLUSTERING  ==> can see bees on the dance floor and can be seen by others on the dance floor
         elif self.state == BeeState.CLUSTERING:
 
-            if self.last_collection_time is not None and self.last_collection_time % STEPS_PER_DAY < self.model.steps % STEPS_PER_DAY:
+            # at sunset the bee enters resting state if she has not yet
+            if self.model.steps % STEPS_PER_DAY >= self.model.sunset % STEPS_PER_DAY:
                 self.state = BeeState.RESTING
                 self.accurate_position = self.model.hive
 
-            elif self.last_collection_time is None and self.model.steps % STEPS_PER_DAY == SUNSET % STEPS_PER_DAY:
+            # after last collection time + max post collection clustering time the bee enters resting state if she has not yet
+            elif self.last_collection_time is not None and self.last_collection_time % STEPS_PER_DAY + MAX_POST_COLLECTION_CLUSTERING_TIME < self.model.steps % STEPS_PER_DAY:
                 self.state = BeeState.RESTING
                 self.accurate_position = self.model.hive
 
+            # if the bee is watching another bee that is dancing, and she is inexperienced or is targeting the same flower she will watch the waggle dance for several durations
             elif self.currently_watched_bee is not None and (self.targeted_flower is self.currently_watched_bee.targeted_flower or self.targeted_flower is None):
                 self.state = BeeState.WATCHING_WAGGLE_DANCE
                 self.targeted_flower = self.currently_watched_bee.targeted_flower if self.targeted_flower is None else self.targeted_flower
-                self.remaining_time_in_state = int(((0.0013 * self.targeted_flower.distance_from_hive) + 1.86) * random.uniform(4.9, 12.9))
+                self._remaining_time_in_state = int(((0.0013 * self.targeted_flower.distance_from_hive) + 1.86) * random.uniform(4.9, 12.9))
 
+            #
             elif self.foraging_strategy == ForagingStrategy.PERSISTENT and self.next_reconnaissance_time == self.model.steps:
                 self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
 
+            elif self.foraging_strategy == ForagingStrategy.PERSISTENT and self.targeted_flower.close_time < self.model.steps:
+                if random.random() < self.late_reconnaissance_probability:
+                    self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
+
 
         elif self.state == BeeState.WATCHING_WAGGLE_DANCE:
-            if self.remaining_time_in_state > 0:
-                self.remaining_time_in_state -= 1
+            if self._remaining_time_in_state > 0:
+                self._remaining_time_in_state -= 1
 
             else:
                 if self.days_of_experience >= 0:
@@ -640,7 +687,7 @@ class ForagerBeeAgent(mesa.Agent):
                 else:
                     self.state = BeeState.FLYING_TO_SEARCH_AREA
                     rand_distance_from_flower = random.randint(1,MAX_SEARCH_RADIUS)
-                    self.search_area_center = generate_random_point(self.targeted_flower.location[0], self.targeted_flower.location[1], rand_distance_from_flower)
+                    self._search_area_center = generate_random_point(self.targeted_flower.location[0], self.targeted_flower.location[1], rand_distance_from_flower)
 
 
                 self.currently_watched_bee = None
@@ -653,8 +700,8 @@ class ForagerBeeAgent(mesa.Agent):
                     self.collection_times.append(self.model.steps)
 
                     C = self.targeted_flower.sucrose_concentration
-                    self.remaining_time_in_state = int(random.uniform(12.44 * C + 20.09, 24.22 * C + 32.07))
-                    self.time_source_found = self.model.steps if self.time_source_found // STEPS_PER_DAY != self.model.get_current_day() else self.time_source_found
+                    self._remaining_time_in_state = int(random.uniform(12.44 * C + 20.09, 24.22 * C + 32.07))
+                    self.time_source_found = self.model.steps if self.time_source_found // STEPS_PER_DAY != self.model.current_day else self.time_source_found
 
                 else:
                     self.state = BeeState.RETURNING
@@ -668,13 +715,13 @@ class ForagerBeeAgent(mesa.Agent):
 
 
         elif self.state == BeeState.FLYING_TO_SEARCH_AREA:
-            if self.accurate_position == self.search_area_center:
+            if self.accurate_position == self._search_area_center:
                 self.state = BeeState.SEARCHING_ADVERTISED_SOURCE
 
 
         elif self.state == BeeState.LOADING_NECTAR:
-            if self.remaining_time_in_state > 0:
-                self.remaining_time_in_state -= 1
+            if self._remaining_time_in_state > 0:
+                self._remaining_time_in_state -= 1
 
             else:
                 self.loaded = True
@@ -686,35 +733,35 @@ class ForagerBeeAgent(mesa.Agent):
                 if self.loaded:
                     self.state = BeeState.UNLOADING_NECTAR
                     C = self.targeted_flower.sucrose_concentration
-                    self.remaining_time_in_state = int(random.uniform(39 * (C ** 2) + 114.1 * C - 64.25, 159 * (C ** 2) - 140 * C + 166))
+                    self._remaining_time_in_state = int(random.uniform(39 * (C ** 2) + 114.1 * C - 64.25, 159 * (C ** 2) - 140 * C + 166))
 
                 else:
                     self.state = BeeState.CLUSTERING
                     self.accurate_position = self.model.dance_floor
 
         elif self.state == BeeState.UNLOADING_NECTAR:
-            if self.remaining_time_in_state > 0:
-                self.remaining_time_in_state -= 1
+            if self._remaining_time_in_state > 0:
+                self._remaining_time_in_state -= 1
 
             else:
                 self.model.total_energy += NECTAR_REWARD * self.targeted_flower.sucrose_concentration
                 self.loaded = False
                 self.state = BeeState.DANCING
-                self.remaining_time_in_state = 0.1713 * self.targeted_flower.value
+                self._remaining_time_in_state = 0.1713 * self.targeted_flower.value
 
 
         elif self.state == BeeState.DANCING:
-            if self.remaining_time_in_state > 0:
-                self.remaining_time_in_state -= 1
+            if self._remaining_time_in_state > 0:
+                self._remaining_time_in_state -= 1
 
             else:
                 self.state = BeeState.PREPARING_TO_FLY_OUT
-                self.remaining_time_in_state = random.randint(16, 51)
+                self._remaining_time_in_state = random.randint(16, 51)
 
 
         elif self.state == BeeState.PREPARING_TO_FLY_OUT:
-            if self.remaining_time_in_state > 0:
-                self.remaining_time_in_state -= 1
+            if self._remaining_time_in_state > 0:
+                self._remaining_time_in_state -= 1
 
             else:
                 self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
@@ -729,7 +776,7 @@ class ForagerBeeAgent(mesa.Agent):
         if not isinstance(self.model, BeeForagingModel):
             raise AttributeError("BeeForagingModel is not an instance of BeeForagingModel")
 
-        if random.random() < self.mortality_probability:
+        if random.random() < self._mortality_probability:
             self.model.agents.remove(self)
 
         self.update_status()
@@ -769,12 +816,12 @@ class ForagerBeeAgent(mesa.Agent):
 
         elif self.state == BeeState.FLYING_TO_SEARCH_AREA:
             self.model.total_energy -= FLYING_COST_UNLOADED
-            if get_distance(self.accurate_position, self.search_area_center) <= FLYING_SPEED:
-                self.accurate_position = self.search_area_center
+            if get_distance(self.accurate_position, self._search_area_center) <= FLYING_SPEED:
+                self.accurate_position = self._search_area_center
 
 
         elif self.state == BeeState.SEARCHING_ADVERTISED_SOURCE:
-            self.search(self.targeted_flower.location, self.search_area_center)
+            self.search(self.targeted_flower.location, self._search_area_center)
 
 
         elif self.state == BeeState.RETURNING:
@@ -797,79 +844,21 @@ class ForagerBeeAgent(mesa.Agent):
             f"Experience: {self.days_of_experience} days\n"
             f"Position: {self.accurate_position}\n"
             f"Loaded: {'Yes' if self.loaded else 'No'}\n"
-            f"Time in state remaining: {self.remaining_time_in_state}\n"
+            f"Time in state remaining: {self._remaining_time_in_state}\n"
             f"Time source found: {self.time_source_found}\n"
             f"Last collection time: {self.last_collection_time}\n"
             f"Next anticipation time: {self.next_anticipation_time}\n"
             f"Foraging strategy: {self.foraging_strategy}\n"
             f"Next reconnaissance time: {self.next_reconnaissance_time}\n"
             f"Collection times: {self.collection_times}\n"
-            f"Mortality probability: {self.mortality_probability:.4f}\n"
+            f"Mortality probability: {self._mortality_probability:.4f}\n"
             f"Targeted flower: {self.targeted_flower}\n"
-            f"Last angle: {self.last_angle:.2f}\n"
-            f"Search area center: {self.search_area_center}\n"
+            f"Last angle: {self._last_angle:.2f}\n"
+            f"Search area center: {self._search_area_center}\n"
             f"Currently watched bee: {self.currently_watched_bee}\n"
             f"Homing motivation: {self.homing_motivation}"
         )
 
-class BeeGrid(mesa.space.MultiGrid):
-    """
-
-        Custom Grid to model the environment for the simulation
-
-        Args:
-            size (int): size of the grid i.e. size x size
-            resolution (int): resolution of the grid (e.g. resolution=10 means 1m = 10 units size units in the model)
-
-        Variables:
-            hive ( (int,int) ): position of the hive ==> bee agents are located here while they rest or unload,
-                                located at the center of the grid
-
-            dance_floor ( (int,int) ): position of the dance floor ==> bee agents are located here while they cluster or dance
-                                       located at (hive_x+1, hive_y)
-    """
-
-    def __init__(self, size):
-        super().__init__(size, size, False)
-        self.hive = (size // 2, size // 2)
-        self.dance_floor = (self.hive[0] + 1, self.hive[1])
-
-
-    def is_close_to_border(self, point):
-        """
-        checks if a position on the grid is too close to the border of the grid
-
-        :param point: location to be tested in tuple format
-        :return: boolean if the position on the grid is too close to the border of the grid
-        """
-        x, y = point
-        return x < MIN_BORDER_DISTANCE or x > self.width - MIN_BORDER_DISTANCE or y < MIN_BORDER_DISTANCE or y > self.height - MIN_BORDER_DISTANCE
-
-
-
-    def visualize_bee_grid(self):
-        print()
-        for y in range(self.height):
-            for x in range(self.width):
-                if (x,y) is self.dance_floor:
-                    print("D", end="")
-                elif (x,y) is self.hive:
-                    print("H", end="")
-                elif any(isinstance(flower, FlowerAgent) for flower in self.get_cell_list_contents([(x,y)])):
-                    print("F", end="")
-                elif any(isinstance(f_bee, ForagerBeeAgent) for f_bee in self.get_cell_list_contents([(x,y)])):
-                    print("B", end="")
-                else:
-                    print("_", end="")
-        print()
-
-    def get_all_dancing_bees(self):
-        return [bee for bee in self.get_cell_list_contents([self.dance_floor]) if isinstance(bee, ForagerBeeAgent) and bee.BeeStatus == BeeState.DANCING]
-
-
-
-
-### model functions ###
 def generate_random_point(origin_x : int | float,
                           origin_y: int | float,
                           target_distance : int | float,
@@ -1047,7 +1036,7 @@ def draw_normal_distributed_value(mean : int | float,
             return value
 
 def get_day_of_step(step : int) -> int:
-    return (step // STEPS_PER_DAY) + 1
+    return step // STEPS_PER_DAY
 
 def split_agents_by_percentage(agents : list, first_percentage : int | float =30):
     """
@@ -1078,77 +1067,72 @@ def split_agents_by_percentage(agents : list, first_percentage : int | float =30
 
     return first_group, second_group
 
-def run_bee_model_instance(params):
+def run_model_instance(time_steps, **params):
+    model = BeeForagingModel(**params)
 
-    distance, foragers, sd = params
+    model.run(time_steps)
+    return model.total_energy
 
-    model_instance = BeeForagingModel(int(distance))
+def run_single_model_instance(args):
+    """
+    Wrapper function that unpacks arguments for run_model_instance
 
-    for k in range(int(foragers)):
-        bee_agent = ForagerBeeAgent(k, model_instance, 1, model_instance.grid.hive)
-        bee_agent.state = BeeState.FLYING_TO_SEARCH_AREA
-        model_instance.schedule.add(bee_agent)
-
-        inc_X = random.randint(-35,35)
-        inc_Y = random.randint(-35,35)
-        bee_agent.targeted_position = (model_instance.flower_location[0]+inc_X, model_instance.flower_location[1]+inc_Y)
-        bee_agent.search_area_center = (model_instance.flower_location[0]+inc_X, model_instance.flower_location[1]+inc_Y)
-
-
-        model_instance.grid.place_agent(bee_agent, model_instance.grid.hive)
-
-    found_at_day = []
-
-    it = 0
-    c = 0
+    :param args: A tuple containing (time_steps, specific_params)
+    :return: Result of the model run
+    """
+    time_steps, specific_params = args
+    return run_model_instance(time_steps, **specific_params)
 
 
-    while True:
-        it += 1
+def parallel_run(num_cores, num_runs_per_combination, time_steps, params):
+    """
+    Run parallel simulations
 
-        for forager in model_instance.schedule.agents:
-            if isinstance(forager, ForagerBeeAgent):
-                if forager.state == BeeState.FLYING_TO_SEARCH_AREA or forager.state == BeeState.SEARCHING_ADVERTISED_SOURCE:
-                    forager.state = BeeState.FLYING_TO_SEARCH_AREA
-                    forager.accurate_position = model_instance.grid.hive
+    :param num_cores: Number of CPU cores to use
+    :param num_runs_per_combination: Number of times to run each parameter combination
+    :param time_steps: Number of simulation steps
+    :param params: List of parameter dictionaries
+    :return: Aggregated results from all runs
+    """
+    # Expand params to include multiple runs
+    expanded_params = [(time_steps, param) for param in params for _ in range(num_runs_per_combination)]
 
-        for _ in range(960):
-            model_instance.schedule.step()
-
-        c = 0
-
-        for forager in model_instance.schedule.agents:
-            if isinstance(forager, ForagerBeeAgent):
-                if forager.state == BeeState.LOADING_NECTAR:
-                    c += 1
-
-        found_at_day.append(c)
-
-        if c == 500 or it >= 20:
-            break
-
-    return found_at_day
-
-def parallel_run(num_processes, num_iterations, params):
-    # Create a list of parameter tuples for each iteration
-    param_list = [params for _ in range(num_iterations)]
-
-    with mp.Pool(processes=num_processes) as pool:
-        results = pool.map(run_bee_model_instance, param_list)
+    # Create a process pool
+    with mp.Pool(processes=num_cores) as pool:
+        # Use map with the wrapper function
+        results = pool.map(run_single_model_instance, expanded_params)
 
     return results
 
-def __main__(args):
-    model = BeeForagingModel(1500, 100)
-    model.run(260000)
-    print(model.total_energy)
-   
+def main(args):
+    number_of_starting_foragers = [10, 20]
+    source_distance = [500, 1000]
+    sucrose_concentration = [1, 1.5, 2]
+    anticipation_method = [1, 2]
 
+    number_of_steps = 3000
+    number_of_runs_per_combination = 10
 
+    params = []
+    for n, d, c, a in itertools.product(
+        number_of_starting_foragers,
+        source_distance,
+        sucrose_concentration,
+        anticipation_method
+    ):
+        params.append({
+            "number_of_starting_bees": n,
+            "source_distance": d,
+            "sucrose_concentration": c,
+            "anticipation_method": a
+        })
 
+    print(parallel_run(
+        mp.cpu_count() - 2,
+        number_of_runs_per_combination,
+        number_of_steps,
+        params
+    ))
 
-
-
-
-if __name__ == '__main__':
-    __main__(sys.argv)
+if __name__ == "__main__":
+    main(sys.argv)
