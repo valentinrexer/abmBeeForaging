@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 #packages for modeling
 import math
+import os
 import sys
 import warnings
+import logging
 from functools import cached_property
-from typing import Tuple
 
 import mesa
 
@@ -17,9 +20,6 @@ import itertools
 
 #packages for data analysis
 import csv
-import pandas as pd
-import numpy as np
-from pandas.core.roperator import rand_
 
 ### definition of fixed global variables ###
 STEPS_PER_DAY = 24 * 3600 # amount of ticks in a full day
@@ -47,6 +47,8 @@ MAX_SEARCH_RADIUS = 50  #m max radius in which bee looks for the source
 ### definition of normal distribution variables for random drawing ###
 MEAN = 0
 STANDARD_DEVIATION = 35
+
+_LOGGER = logging.getLogger(__name__)
 
 #flower colors
 class Color(Enum):
@@ -93,7 +95,9 @@ class BeeForagingModel(mesa.Model):
                  sunset : int = 19 * 3600,
                  anticipation_method : int = 1,
                  flower_open : int = 9 * 3600,
-                 flower_closed : int = 14 * 3600) -> None:
+                 flower_closed : int = 14 * 3600,
+                 collector_path : str = None,
+                 collection_interval : int = None) -> None:
         """
         Initializes the BeeForagingModel instance
 
@@ -108,6 +112,7 @@ class BeeForagingModel(mesa.Model):
         self.anticipation_method = anticipation_method
         self.number_of_starting_bees = number_of_starting_bees
         self.sucrose_concentration = sucrose_concentration
+        self._source_distance = source_distance
 
         self.total_energy = 0   # this is the final output for our model
 
@@ -138,15 +143,11 @@ class BeeForagingModel(mesa.Model):
         # assign foraging strategies to the newly created foragers (PERSISTENT/RETICENT)
         self.update_bee_foraging_strategies()
 
-    def debug(self, steps : int) -> None:
-        for _ in range(steps):
-            self.step()
 
-            if self.steps > 117000:
-
-                for bee in self.agents:
-                    if not isinstance(bee, ForagerBeeAgent):
-                        continue
+        self.collector = (DataCollector(self, collector_path, collection_interval)
+                          if collector_path is not None
+                             and collection_interval is not None
+                          else None)
 
     def run(self, steps : int) -> None:
         """
@@ -158,7 +159,7 @@ class BeeForagingModel(mesa.Model):
         for _ in range(steps):
             self.step()
 
-    def out_of_bounds(self, pos : Tuple[float, float]) -> bool:
+    def out_of_bounds(self, pos : tuple[float, float]) -> bool:
         """
         Determines if a given position is still on the virtual grid
 
@@ -202,6 +203,10 @@ class BeeForagingModel(mesa.Model):
         :return: current day
         """
         return self.steps // STEPS_PER_DAY
+
+    @property
+    def initial_source_distance(self) -> float:
+        return self._source_distance
 
     def update_bee_foraging_strategies(self) -> None:
         """
@@ -334,6 +339,9 @@ class BeeForagingModel(mesa.Model):
 
         self.agents.do("step")
 
+        if self.collector is not None:
+            self.collector.check_for_collection_call()
+
         # every day the foraging strategies are reassigned, new foragers are added, and new day skippers are determined
         # on the first day of the simulation we already manually created all the agents so we skip the update on the first day
         # on step one of a new day the Agents update their variables, so the model updates its variables on step 2 of each day
@@ -347,7 +355,7 @@ class FlowerAgent(mesa.Agent):
     Models a flower/food source in the model
     """
     def __init__(self, bee_model : BeeForagingModel,
-                 location : Tuple[int, int] | Tuple[float, float],
+                 location : tuple[int, int] | tuple[float, float],
                  sucrose_stock : int | float,
                  open_time : int,
                  close_time : int,
@@ -428,7 +436,7 @@ class ForagerBeeAgent(mesa.Agent):
     """
     def __init__(self, bee_model : BeeForagingModel,
                  days_of_experience : int,
-                 start_pos : Tuple[int, int] | Tuple[float, float],
+                 start_pos : tuple[int, int] | tuple[float, float],
                  time_source_found : int =-1) -> None:
 
         """
@@ -491,7 +499,7 @@ class ForagerBeeAgent(mesa.Agent):
         else:
             return -1
 
-    def search(self, flower : FlowerAgent, search_area_center : Tuple[float, float]) -> None:
+    def search(self, flower : FlowerAgent, search_area_center : tuple[float, float]) -> None:
         """
         Models the bee search behaviour
             => If the bee is closer than MAX_SIGHT  to the source it or was in this range sometimes between the current and last time step it directly flies to the flower
@@ -516,7 +524,7 @@ class ForagerBeeAgent(mesa.Agent):
 
         self.homing_motivation += 1
 
-    def move_bee_towards_point(self, destination : Tuple[float, float], speed : float) -> None:
+    def move_bee_towards_point(self, destination : tuple[float, float], speed : float) -> None:
 
         """
         Moves a bee agent towards a point. On tick in this model equals one second in ==> The distance the bee travels
@@ -859,11 +867,65 @@ class ForagerBeeAgent(mesa.Agent):
             f"Homing motivation: {self.homing_motivation}"
         )
 
+class DataCollector:
+    """
+    Collects data from a BeeForagingModel instance in specified intervals
+    """
+    def __init__(self, model : BeeForagingModel, path_to_csv :str, collection_interval : int) -> None:
+        if not isinstance(model, BeeForagingModel):
+            raise TypeError("BeeForagingModel must be a BeeForagingModel")
+
+        if not os.path.exists(path_to_csv):
+            raise AttributeError(f"File {path_to_csv} does not exist")
+
+        self.model = model
+        self.path_to_csv = path_to_csv
+        self.collection_interval = collection_interval
+        self.columns = ['number_of_starting_foragers', 'source_distance', 'sucrose_concentration', 'anticipation_method', 'time_step', 'energy']
+
+
+        file_is_empty = not os.path.exists(path_to_csv) or os.path.getsize(path_to_csv) == 0
+        if file_is_empty:
+            self.make_header()
+
+    def make_header(self) -> None:
+        """
+        Creates a header for the csv file
+        """
+        with open (self.path_to_csv, "a") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(self.columns)
+
+    def collect_data(self) -> None:
+        """
+        Collects data of all columns specified in self.columns
+        """
+        row = [self.model.number_of_starting_bees,
+               self.model.initial_source_distance,
+               self.model.sucrose_concentration,
+               self.model.anticipation_method,
+               self.model.steps,
+               self.model.total_energy]
+
+        with open (self.path_to_csv, "a") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(row)
+
+    def check_for_collection_call(self) -> None:
+        """
+        Checks if the model has reached a collection time
+        """
+        if self.model.steps == 0:
+            return
+
+        if self.model.steps % self.collection_interval == 0:
+            self.collect_data()
+
 def generate_random_point(origin_x : int | float,
                           origin_y: int | float,
                           target_distance : int | float,
-                          tolerance: float =0.1,
-                          max_attempts : int=10000) -> Tuple[int, int] | None:
+                          tolerance: float =0.01,
+                          max_attempts : int=10000) -> tuple[float, float] | None:
     """
     Generate a random point on the grid with a given distance to a given point (the hive in our model)
 
@@ -888,11 +950,11 @@ def generate_random_point(origin_x : int | float,
 
         # If both coordinates are positive, return the point
         if x >= 0 and y >= 0:
-            return int(round(x, 2)), int(round(y, 2))
+            return round(x, 5), round(y, 5)
 
 def get_next_point(current_x : int | float,
                    current_y : int | float,
-                   angle : float, distance : float) -> Tuple[float, float] | None:
+                   angle : float, distance : float) -> tuple[float, float] | None:
     """
         Returns the next point given a start point, direction(angle) and distance
 
@@ -906,13 +968,13 @@ def get_next_point(current_x : int | float,
     y_next = current_y + distance * math.sin(angle)
     return round(x_next, 2), round(y_next, 2)
 
-def get_distance(pos1 : Tuple[float, float], pos2 : Tuple[float, float]) -> float:
+def get_distance(pos1 : tuple[float, float], pos2 : tuple[float, float]) -> float:
     """
         Use euclidian distance to calculate the distance between two points
     """
     return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
 
-def get_angle(starting_point: Tuple[float, float], destination_point : Tuple[float, float]) -> float:
+def get_angle(starting_point: tuple[float, float], destination_point : tuple[float, float]) -> float:
     """
         the angle in a triangle is calculated by arctan(y/x)
 
@@ -983,7 +1045,7 @@ def normalize_angle(current_angle : float) -> float:
 def radians_to_degrees(radians : int | float) -> float:
     return radians * (180 / math.pi)
 
-def circle_line_intersect(p1 : Tuple[float, float], p2 : Tuple[float, float], circle_center : Tuple[float, float], radius : float) -> bool:
+def circle_line_intersect(p1 : tuple[float, float], p2 : tuple[float, float], circle_center : tuple[float, float], radius : float) -> bool:
     # Extract coordinates
     x1, y1 = p1
     x2, y2 = p2
@@ -1080,7 +1142,9 @@ def run_single_model_instance(args):
     :param args: A tuple containing (time_steps, specific_params)
     :return: Result of the model run
     """
+
     time_steps, specific_params = args
+    _LOGGER.info(f"Running model instance for parameters: {specific_params}")
     return run_model_instance(time_steps, **specific_params)
 
 
@@ -1110,8 +1174,10 @@ def main(args):
     sucrose_concentration = [1, 1.5, 2]
     anticipation_method = [1, 2]
 
-    number_of_steps = 3000
+    number_of_steps = 172800
     number_of_runs_per_combination = 10
+
+    csv_path = r"/home/run_out.csv"
 
     params = []
     for n, d, c, a in itertools.product(
@@ -1124,7 +1190,9 @@ def main(args):
             "number_of_starting_bees": n,
             "source_distance": d,
             "sucrose_concentration": c,
-            "anticipation_method": a
+            "anticipation_method": a,
+            "collector_path" : csv_path,
+            "collection_interval": STEPS_PER_DAY
         })
 
     print(parallel_run(
