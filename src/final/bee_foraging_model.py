@@ -629,7 +629,7 @@ class ForagerBeeAgent(mesa.Agent):
 
         # for persistent foragers the next time they will do a reconnaissance flight (if not employed before) is assigned as well
         if self.foraging_strategy == ForagingStrategy.PERSISTENT:
-            self.next_reconnaissance_time = random.randint(self.next_anticipation_time, (self.time_source_found % STEPS_PER_DAY) + (self.model.current_day) * STEPS_PER_DAY)
+            self.next_reconnaissance_time = random.randint(self.next_anticipation_time, (self.time_source_found % STEPS_PER_DAY) + self.model.current_day * STEPS_PER_DAY)
 
         else:
             self.next_reconnaissance_time = None
