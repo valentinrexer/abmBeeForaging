@@ -122,7 +122,7 @@ class BeeForagingModel(mesa.Model):
         self.dance_floor = (self.hive[0] + 1, self.hive[1])
 
         # create flower (food source) and place it on the grid
-        flower_location = generate_random_point(self.hive[0], self.hive[1], source_distance, 0.01)
+        flower_location = Calc.generate_random_point(self.hive[0], self.hive[1], source_distance, 0.01)
         flower = FlowerAgent(self, flower_location, 1000, flower_open, flower_closed, sucrose_concentration)
         self.agents.add(flower)
 
@@ -230,7 +230,7 @@ class BeeForagingModel(mesa.Model):
                 bee.days_of_experience == days_of_experience and
                 bee.state != BeeState.DAY_SKIPPING]
 
-        bee_groups = split_agents_by_percentage(bees, persistent_percentage)
+        bee_groups = Calc.split_agents_by_percentage(bees, persistent_percentage)
 
         for bee in bee_groups[0]:
             bee.foraging_strategy = ForagingStrategy.PERSISTENT
@@ -249,7 +249,7 @@ class BeeForagingModel(mesa.Model):
                 bee.days_of_experience >= days_of_experience and
                 bee.state != BeeState.DAY_SKIPPING]
 
-        bee_groups = split_agents_by_percentage(bees, persistent_percentage)
+        bee_groups = Calc.split_agents_by_percentage(bees, persistent_percentage)
 
         for bee in bee_groups[0]:
             bee.foraging_strategy = ForagingStrategy.PERSISTENT
@@ -271,7 +271,7 @@ class BeeForagingModel(mesa.Model):
 
             bee.state = BeeState.RESTING if bee.state == BeeState.DAY_SKIPPING else bee.state
 
-        bee_groups = split_agents_by_percentage(self.get_bees(), percentage)
+        bee_groups = Calc.split_agents_by_percentage(self.get_bees(), percentage)
         for bee in bee_groups[0]:
             bee.state = BeeState.DAY_SKIPPING
 
@@ -393,11 +393,11 @@ class FlowerAgent(mesa.Agent):
 
     @cached_property
     def flight_duration(self) -> float:
-        return get_distance(self.location, self.model.hive) / FLYING_SPEED
+        return Calc.get_distance(self.location, self.model.hive) / FLYING_SPEED
 
     @cached_property
     def distance_from_hive(self):
-        return get_distance(self.location, self.model.hive)
+        return Calc.get_distance(self.location, self.model.hive)
 
     @cached_property
     def value(self):
@@ -483,7 +483,7 @@ class ForagerBeeAgent(mesa.Agent):
             raise TypeError("bee_model must be of type BeeForagingModel")
 
         time_source_found = self.time_source_found % STEPS_PER_DAY
-        distance = get_distance(self.targeted_flower.location, self.model.hive)
+        distance = Calc.get_distance(self.targeted_flower.location, self.model.hive)
 
         if not sunrise <= time_source_found <= sunset:
             warnings.warn("Invalid argument for time_source_found")
@@ -510,16 +510,16 @@ class ForagerBeeAgent(mesa.Agent):
         """
         self._search_area_center = search_area_center
 
-        if get_distance(self.accurate_position, flower.location) <= flower.visibility_radius or self.last_move_crossed_flower_radius(self._last_angle, SEARCHING_SPEED, flower):
+        if Calc.get_distance(self.accurate_position, flower.location) <= flower.visibility_radius or self.last_move_crossed_flower_radius(self._last_angle, SEARCHING_SPEED, flower):
             self.move_bee_towards_point(flower.location, SEARCHING_SPEED)
 
-        elif get_distance(self.accurate_position, self._search_area_center) >= MAX_SEARCH_RADIUS:
-            angle = get_angle(self.accurate_position, self._search_area_center)
-            angle = random_deviate_angle_equally(angle, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
+        elif Calc.get_distance(self.accurate_position, self._search_area_center) >= MAX_SEARCH_RADIUS:
+            angle = Calc.get_angle(self.accurate_position, self._search_area_center)
+            angle = Calc.random_deviate_angle_equally(angle, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
             self.move_bee_with_angle(angle, SEARCHING_SPEED)
 
         else:
-            angle = random_deviate_angle(self._last_angle, MEAN, STANDARD_DEVIATION, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
+            angle = Calc.random_deviate_angle(self._last_angle, MEAN, STANDARD_DEVIATION, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
             self.move_bee_with_angle(angle, SEARCHING_SPEED)
 
         self.homing_motivation += 1
@@ -539,7 +539,7 @@ class ForagerBeeAgent(mesa.Agent):
         if self.model.out_of_bounds(destination):
             raise ValueError("Destination out of bounds")
 
-        angle = get_angle(self.accurate_position, destination)
+        angle = Calc.get_angle(self.accurate_position, destination)
         current_distance = math.sqrt((self.accurate_position[0] - destination[0]) ** 2 + (self.accurate_position[1] - destination[1]) ** 2)
 
         if current_distance < speed:
@@ -593,7 +593,7 @@ class ForagerBeeAgent(mesa.Agent):
         last_x = self.accurate_position[0] - speed * math.cos(last_angle)
         last_y = self.accurate_position[1] - speed * math.sin(last_angle)
 
-        return circle_line_intersect((last_x, last_y), (curr_x, curr_y), flower.location, flower.visibility_radius)
+        return Calc.circle_line_intersect((last_x, last_y), (curr_x, curr_y), flower.location, flower.visibility_radius)
 
     @property
     def late_reconnaissance_probability(self) -> float:
@@ -623,7 +623,7 @@ class ForagerBeeAgent(mesa.Agent):
         # if the bee has been collecting nectar on the previous day its number of days of experience is increased
         if (self.last_collection_time is not None and
                 self.state != BeeState.DAY_SKIPPING and
-                get_day_of_step(self.last_collection_time) == self.model.current_day - 1):
+                Calc.get_day_of_step(self.last_collection_time) == self.model.current_day - 1):
 
            self.days_of_experience += 1
 
@@ -633,6 +633,27 @@ class ForagerBeeAgent(mesa.Agent):
 
         else:
             self.next_reconnaissance_time = None
+
+    def update_status_resting(self):
+        pass
+    def update_status_clustering(self):
+        pass
+    def update_status_watching_waggle_dance(self):
+        pass
+    def update_status_flying_to_source_or_searching(self):
+        pass
+    def update_status_flying_to_search_area(self):
+        pass
+    def update_status_loading(self):
+        pass
+    def update_status_returning(self):
+        pass
+    def update_status_unloading(self):
+        pass
+    def update_status_dancing(self):
+        pass
+    def update_status_preparing_to_fly_out(self):
+        pass
 
     def update_status(self) -> None:
         """
@@ -695,7 +716,7 @@ class ForagerBeeAgent(mesa.Agent):
                 else:
                     self.state = BeeState.FLYING_TO_SEARCH_AREA
                     rand_distance_from_flower = random.randint(1,MAX_SEARCH_RADIUS)
-                    self._search_area_center = generate_random_point(self.targeted_flower.location[0], self.targeted_flower.location[1], rand_distance_from_flower)
+                    self._search_area_center = Calc.generate_random_point(self.targeted_flower.location[0], self.targeted_flower.location[1], rand_distance_from_flower)
 
 
                 self.currently_watched_bee = None
@@ -801,7 +822,7 @@ class ForagerBeeAgent(mesa.Agent):
 
         elif self.state == BeeState.CLUSTERING:
             self.model.total_energy -= RESTING_ENERGY_COST
-            seen_bees = split_agents_by_percentage(self.model.get_bees_on_dance_floor(), 4)[0]
+            seen_bees = Calc.split_agents_by_percentage(self.model.get_bees_on_dance_floor(), 4)[0]
 
 
             for bee in seen_bees:
@@ -815,7 +836,7 @@ class ForagerBeeAgent(mesa.Agent):
         elif self.state == BeeState.FLYING_STRAIGHT_TO_FLOWER:
             self.model.total_energy -= FLYING_COST_UNLOADED
 
-            if get_distance(self.accurate_position, self.targeted_flower.location) <= FLYING_SPEED:
+            if Calc.get_distance(self.accurate_position, self.targeted_flower.location) <= FLYING_SPEED:
                 self.accurate_position = self.targeted_flower.location
 
             else:
@@ -824,7 +845,7 @@ class ForagerBeeAgent(mesa.Agent):
 
         elif self.state == BeeState.FLYING_TO_SEARCH_AREA:
             self.model.total_energy -= FLYING_COST_UNLOADED
-            if get_distance(self.accurate_position, self._search_area_center) <= FLYING_SPEED:
+            if Calc.get_distance(self.accurate_position, self._search_area_center) <= FLYING_SPEED:
                 self.accurate_position = self._search_area_center
 
 
@@ -840,7 +861,7 @@ class ForagerBeeAgent(mesa.Agent):
                 self.model.total_energy -= FLYING_COST_UNLOADED
 
 
-            if get_distance(self.accurate_position, self.model.dance_floor) <= FLYING_SPEED:
+            if Calc.get_distance(self.accurate_position, self.model.dance_floor) <= FLYING_SPEED:
                 self.accurate_position = self.model.dance_floor
 
             else:
@@ -921,213 +942,230 @@ class DataCollector:
         if self.model.steps % self.collection_interval == 0:
             self.collect_data()
 
-def generate_random_point(origin_x : int | float,
-                          origin_y: int | float,
-                          target_distance : int | float,
-                          tolerance: float =0.01,
-                          max_attempts : int=10000) -> tuple[float, float] | None:
+class Calc:
     """
-    Generate a random point on the grid with a given distance to a given point (the hive in our model)
-
-    :param origin_x: x coordinate of the given point
-    :param origin_y: y coordinate of the given point
-    :param target_distance: the distance between the given point and the new point
-    :param tolerance: max difference between the desired and actual distance between the given point and the new point
-    :param max_attempts: max number of attempts to find a point on the grid that fulfills all criteria (to prevent an infinity loop)
-    :return:
-    """
-    for _ in range(max_attempts):
-        angle = random.uniform(0, 2* math.pi)
-
-        # Add some randomness to the distance within the tolerance range
-        min_distance = target_distance * (1 - tolerance)
-        max_distance = target_distance * (1 + tolerance)
-        actual_distance = random.uniform(min_distance, max_distance)
-
-        # Calculate the point using polar coordinates
-        x = origin_x + actual_distance * math.cos(angle)
-        y = origin_y + actual_distance * math.sin(angle)
-
-        # If both coordinates are positive, return the point
-        if x >= 0 and y >= 0:
-            return round(x, 5), round(y, 5)
-
-def get_next_point(current_x : int | float,
-                   current_y : int | float,
-                   angle : float, distance : float) -> tuple[float, float] | None:
-    """
-        Returns the next point given a start point, direction(angle) and distance
-
-        Args:
-            current_x (int): x coordinate of the current point
-            current_y (int): y coordinate of the current point
-            angle (float): angle between 0 and 2pi that determines the direction of movement
-            distance (float): distance that's to be covered
-    """
-    x_next = current_x + distance * math.cos(angle)
-    y_next = current_y + distance * math.sin(angle)
-    return round(x_next, 2), round(y_next, 2)
-
-def get_distance(pos1 : tuple[float, float], pos2 : tuple[float, float]) -> float:
-    """
-        Use euclidian distance to calculate the distance between two points
-    """
-    return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
-
-def get_angle(starting_point: tuple[float, float], destination_point : tuple[float, float]) -> float:
-    """
-        the angle in a triangle is calculated by arctan(y/x)
-
-        We use this principle to calculate the angle/direction in which an object would have to
-        be moved to reach a given point
+    Class for all static methods for calculations and geometry
     """
 
-    dx = destination_point[0] - starting_point[0]
-    dy = destination_point[1] - starting_point[1]
+    @staticmethod
+    def generate_random_point(origin_x : int | float,
+                              origin_y: int | float,
+                              target_distance : int | float,
+                              tolerance: float =0.01,
+                              max_attempts : int=10000) -> tuple[float, float] | None:
+        """
+        Generate a random point on the grid with a given distance to a given point (the hive in our model)
 
-    angle = math.atan2(dy, dx)
+        :param origin_x: x coordinate of the given point
+        :param origin_y: y coordinate of the given point
+        :param target_distance: the distance between the given point and the new point
+        :param tolerance: max difference between the desired and actual distance between the given point and the new point
+        :param max_attempts: max number of attempts to find a point on the grid that fulfills all criteria (to prevent an infinity loop)
+        :return:
+        """
+        for _ in range(max_attempts):
+            angle = random.uniform(0, 2* math.pi)
 
-    return normalize_angle(angle)
+            # Add some randomness to the distance within the tolerance range
+            min_distance = target_distance * (1 - tolerance)
+            max_distance = target_distance * (1 + tolerance)
+            actual_distance = random.uniform(min_distance, max_distance)
 
-def random_deviate_angle(current_angle : float,
-                         mean : int | float,
-                         standard_deviation : int | float,
-                         min_value: int | float,
-                         max_value: int | float,
-                         radians : bool =False) -> float:
-    """
-    Alters a given angle by a randomly drawn value
+            # Calculate the point using polar coordinates
+            x = origin_x + actual_distance * math.cos(angle)
+            y = origin_y + actual_distance * math.sin(angle)
 
-    :param current_angle:
-    :param mean:
-    :param standard_deviation:
-    :param min_value:
-    :param max_value:
-    :param radians:
-    :return:
-    """
-    deviation = draw_normal_distributed_value(mean, standard_deviation, min_value, max_value)
+            # If both coordinates are positive, return the point
+            if x >= 0 and y >= 0:
+                return round(x, 5), round(y, 5)
 
-    if not radians:
-        deviation = math.radians(deviation)
+    @staticmethod
+    def get_next_point(current_x : int | float,
+                       current_y : int | float,
+                       angle : float, distance : float) -> tuple[float, float] | None:
+        """
+            Returns the next point given a start point, direction(angle) and distance
 
-    current_angle += deviation
-    current_angle = current_angle % (2 * math.pi)
+            Args:
+                current_x (int): x coordinate of the current point
+                current_y (int): y coordinate of the current point
+                angle (float): angle between 0 and 2pi that determines the direction of movement
+                distance (float): distance that's to be covered
+        """
+        x_next = current_x + distance * math.cos(angle)
+        y_next = current_y + distance * math.sin(angle)
+        return round(x_next, 2), round(y_next, 2)
 
-    if current_angle < 0:
-        current_angle += 2 * math.pi
+    @staticmethod
+    def get_distance(pos1 : tuple[float, float], pos2 : tuple[float, float]) -> float:
+        """
+            Use euclidian distance to calculate the distance between two points
+        """
+        return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
 
-    return current_angle
+    @staticmethod
+    def get_angle(starting_point: tuple[float, float], destination_point : tuple[float, float]) -> float:
+        """
+            the angle in a triangle is calculated by arctan(y/x)
 
-def random_deviate_angle_equally(angle : float,
-                                 min_value : int | float,
-                                 max_value : int | float,
-                                 radians : bool=False):
+            We use this principle to calculate the angle/direction in which an object would have to
+            be moved to reach a given point
+        """
 
-    deviation = random.uniform(min_value, max_value)
+        dx = destination_point[0] - starting_point[0]
+        dy = destination_point[1] - starting_point[1]
 
-    if radians:
-        angle += deviation
+        angle = math.atan2(dy, dx)
 
-    else:
-        angle += math.radians(deviation)
+        return Calc.normalize_angle(angle)
 
-    return normalize_angle(angle)
+    @staticmethod
+    def random_deviate_angle(current_angle : float,
+                             mean : int | float,
+                             standard_deviation : int | float,
+                             min_value: int | float,
+                             max_value: int | float,
+                             radians : bool =False) -> float:
+        """
+        Alters a given angle by a randomly drawn value
 
-def normalize_angle(current_angle : float) -> float:
-    angle = current_angle % (2 * math.pi)
+        :param current_angle:
+        :param mean:
+        :param standard_deviation:
+        :param min_value:
+        :param max_value:
+        :param radians:
+        :return:
+        """
+        deviation = Calc.draw_normal_distributed_value(mean, standard_deviation, min_value, max_value)
 
-    if angle < 0:
-        angle += 2 * math.pi
+        if not radians:
+            deviation = math.radians(deviation)
 
-    return angle
+        current_angle += deviation
+        current_angle = current_angle % (2 * math.pi)
 
-def radians_to_degrees(radians : int | float) -> float:
-    return radians * (180 / math.pi)
+        if current_angle < 0:
+            current_angle += 2 * math.pi
 
-def circle_line_intersect(p1 : tuple[float, float], p2 : tuple[float, float], circle_center : tuple[float, float], radius : float) -> bool:
-    # Extract coordinates
-    x1, y1 = p1
-    x2, y2 = p2
-    cx, cy = circle_center
+        return current_angle
 
-    # Vector from p1 to p2
-    dx = x2 - x1
-    dy = y2 - y1
+    @staticmethod
+    def random_deviate_angle_equally(angle : float,
+                                     min_value : int | float,
+                                     max_value : int | float,
+                                     radians : bool=False):
 
-    # Vector from p1 to circle center
-    pcx = cx - x1
-    pcy = cy - y1
+        deviation = random.uniform(min_value, max_value)
 
-    # Length of line segment squared
-    line_length_sq = dx * dx + dy * dy
+        if radians:
+            angle += deviation
 
-    # Skip if line segment has zero length
-    if line_length_sq == 0:
-        # Check if p1 is within circle
-        return math.sqrt(pcx * pcx + pcy * pcy) <= radius
+        else:
+            angle += math.radians(deviation)
 
-    # Project circle center onto line segment
-    proj = (pcx * dx + pcy * dy) / line_length_sq
+        return Calc.normalize_angle(angle)
 
-    # Find closest point on line segment to circle center
-    if proj < 0:
-        closest_x, closest_y = x1, y1
-    elif proj > 1:
-        closest_x, closest_y = x2, y2
-    else:
-        closest_x = x1 + proj * dx
-        closest_y = y1 + proj * dy
+    @staticmethod
+    def normalize_angle(current_angle : float) -> float:
+        angle = current_angle % (2 * math.pi)
 
-    # Calculate distance from closest point to circle center
-    distance = math.sqrt(
-        (closest_x - cx) * (closest_x - cx) +
-        (closest_y - cy) * (closest_y - cy)
-    )
+        if angle < 0:
+            angle += 2 * math.pi
 
-    # Compare with radius
-    return distance <= radius
+        return angle
 
-def draw_normal_distributed_value(mean : int | float,
-                                  standard_deviation : int | float,
-                                  min_value : int | float,
-                                  max_value : int | float) -> float:
-    while True:
-        value = random.normalvariate(mean, standard_deviation)
-        if min_value <= value <= max_value:
-            return value
+    @staticmethod
+    def radians_to_degrees(radians : int | float) -> float:
+        return radians * (180 / math.pi)
 
-def get_day_of_step(step : int) -> int:
-    return step // STEPS_PER_DAY
+    @staticmethod
+    def circle_line_intersect(p1 : tuple[float, float], p2 : tuple[float, float], circle_center : tuple[float, float], radius : float) -> bool:
+        # Extract coordinates
+        x1, y1 = p1
+        x2, y2 = p2
+        cx, cy = circle_center
 
-def split_agents_by_percentage(agents : list, first_percentage : int | float =30):
-    """
+        # Vector from p1 to p2
+        dx = x2 - x1
+        dy = y2 - y1
 
-    :param agents:
-    :param first_percentage:
-    :return:
-    """
+        # Vector from p1 to circle center
+        pcx = cx - x1
+        pcy = cy - y1
 
-    if not agents:
-        return [], []
+        # Length of line segment squared
+        line_length_sq = dx * dx + dy * dy
 
-    # Ensure percentage is within bounds
-    first_percentage = max(0, min(100, first_percentage))
+        # Skip if line segment has zero length
+        if line_length_sq == 0:
+            # Check if p1 is within circle
+            return math.sqrt(pcx * pcx + pcy * pcy) <= radius
 
-    # Calculate how many agents go in the first group
-    num_in_first = int(len(agents) * (first_percentage / 100))
-    if num_in_first == 0:
-        num_in_first = 1
+        # Project circle center onto line segment
+        proj = (pcx * dx + pcy * dy) / line_length_sq
 
-    # Create a copy and shuffle it
-    shuffled_agents = agents.copy()
-    random.shuffle(shuffled_agents)
+        # Find closest point on line segment to circle center
+        if proj < 0:
+            closest_x, closest_y = x1, y1
+        elif proj > 1:
+            closest_x, closest_y = x2, y2
+        else:
+            closest_x = x1 + proj * dx
+            closest_y = y1 + proj * dy
 
-    # Split the shuffled agents
-    first_group = shuffled_agents[:num_in_first]
-    second_group = shuffled_agents[num_in_first:]
+        # Calculate distance from closest point to circle center
+        distance = math.sqrt(
+            (closest_x - cx) * (closest_x - cx) +
+            (closest_y - cy) * (closest_y - cy)
+        )
 
-    return first_group, second_group
+        # Compare with radius
+        return distance <= radius
+
+    @staticmethod
+    def draw_normal_distributed_value(mean : int | float,
+                                      standard_deviation : int | float,
+                                      min_value : int | float,
+                                      max_value : int | float) -> float:
+        while True:
+            value = random.normalvariate(mean, standard_deviation)
+            if min_value <= value <= max_value:
+                return value
+
+    @staticmethod
+    def get_day_of_step(step : int) -> int:
+        return step // STEPS_PER_DAY
+
+    @staticmethod
+    def split_agents_by_percentage(agents : list, first_percentage : int | float =30):
+        """
+
+        :param agents:
+        :param first_percentage:
+        :return:
+        """
+
+        if not agents:
+            return [], []
+
+        # Ensure percentage is within bounds
+        first_percentage = max(0, min(100, first_percentage))
+
+        # Calculate how many agents go in the first group
+        num_in_first = int(len(agents) * (first_percentage / 100))
+        if num_in_first == 0:
+            num_in_first = 1
+
+        # Create a copy and shuffle it
+        shuffled_agents = agents.copy()
+        random.shuffle(shuffled_agents)
+
+        # Split the shuffled agents
+        first_group = shuffled_agents[:num_in_first]
+        second_group = shuffled_agents[num_in_first:]
+
+        return first_group, second_group
 
 def run_model_instance(time_steps, **params):
     model = BeeForagingModel(**params)
