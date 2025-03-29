@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-#packages for modeling
-import math
 import os
 import sys
-import warnings
 import logging
 from functools import cached_property
 
 import mesa
 
 #packages for feature implementation
-from enum import Enum
+from custom_enum import *
 import random
+import math
 
 #packages for multicore processing
 import multiprocessing as mp
@@ -50,38 +48,6 @@ STANDARD_DEVIATION = 35
 
 _LOGGER = logging.getLogger(__name__)
 
-#flower colors
-class Color(Enum):
-    RED = 1,
-    GREEN = 2,
-    BLUE = 3,
-    PURPLE = 4,
-    YELLOW = 5,
-    WHITE = 6,
-
-#flower closed
-class Bloom(Enum):
-    OPEN = True,
-    CLOSED = False
-
-#bee status
-class BeeState(Enum):
-    RESTING = 1,
-    CLUSTERING = 2,
-    DANCING = 3,
-    WATCHING_WAGGLE_DANCE = 4,
-    PREPARING_TO_FLY_OUT = 5,
-    RETURNING = 6,
-    LOADING_NECTAR = 7,
-    UNLOADING_NECTAR = 8,
-    FLYING_TO_SEARCH_AREA = 9,
-    SEARCHING_ADVERTISED_SOURCE = 10,
-    FLYING_STRAIGHT_TO_FLOWER = 11,
-    DAY_SKIPPING = 12,
-
-class ForagingStrategy(Enum):
-    PERSISTENT = 1,
-    RETICENT = 2,
 
 class BeeForagingModel(mesa.Model):
     """
@@ -485,9 +451,6 @@ class ForagerBeeAgent(mesa.Agent):
         time_source_found = self.time_source_found % STEPS_PER_DAY
         distance = Calc.get_distance(self.targeted_flower.location, self.model.hive)
 
-        if not sunrise <= time_source_found <= sunset:
-            warnings.warn("Invalid argument for time_source_found")
-
         if method == 1:
             anticipation = int(time_source_found - distance/FLYING_SPEED)
             return int(self.model.today(anticipation))
@@ -635,25 +598,125 @@ class ForagerBeeAgent(mesa.Agent):
             self.next_reconnaissance_time = None
 
     def update_status_resting(self):
-        pass
+        if self.model.steps % STEPS_PER_DAY == self.next_anticipation_time % STEPS_PER_DAY:
+            self.state = BeeState.CLUSTERING
+            self.accurate_position = self.model.dance_floor
+
     def update_status_clustering(self):
-        pass
+        # at sunset the bee enters resting state if she has not yet
+        if self.model.steps % STEPS_PER_DAY >= self.model.sunset % STEPS_PER_DAY:
+            self.state = BeeState.RESTING
+            self.accurate_position = self.model.hive
+
+        # after last collection time + max post collection clustering time the bee enters resting state if she has not yet
+        elif self.last_collection_time is not None and self.last_collection_time % STEPS_PER_DAY + MAX_POST_COLLECTION_CLUSTERING_TIME < self.model.steps % STEPS_PER_DAY:
+            self.state = BeeState.RESTING
+            self.accurate_position = self.model.hive
+
+        # if the bee is watching another bee that is dancing, and she is inexperienced or is targeting the same flower she will watch the waggle dance for several durations
+        elif self.currently_watched_bee is not None and (
+                self.targeted_flower is self.currently_watched_bee.targeted_flower or self.targeted_flower is None):
+            self.state = BeeState.WATCHING_WAGGLE_DANCE
+            self.targeted_flower = self.currently_watched_bee.targeted_flower if self.targeted_flower is None else self.targeted_flower
+            self._remaining_time_in_state = int(
+                ((0.0013 * self.targeted_flower.distance_from_hive) + 1.86) * random.uniform(4.9, 12.9))
+
+        #
+        elif self.foraging_strategy == ForagingStrategy.PERSISTENT and self.next_reconnaissance_time == self.model.steps:
+            self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
+
+        elif self.foraging_strategy == ForagingStrategy.PERSISTENT and self.targeted_flower.close_time < self.model.steps:
+            if random.random() < self.late_reconnaissance_probability:
+                self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
+
     def update_status_watching_waggle_dance(self):
-        pass
+        if self._remaining_time_in_state > 0:
+            self._remaining_time_in_state -= 1
+
+        else:
+            if self.days_of_experience >= 0:
+                self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
+
+            else:
+                self.state = BeeState.FLYING_TO_SEARCH_AREA
+                rand_distance_from_flower = random.randint(1, MAX_SEARCH_RADIUS)
+                self._search_area_center = Calc.generate_random_point(self.targeted_flower.location[0],
+                                                                      self.targeted_flower.location[1],
+                                                                      rand_distance_from_flower)
+
+            self.currently_watched_bee = None
+
     def update_status_flying_to_source_or_searching(self):
-        pass
+        if self.accurate_position == self.targeted_flower.location:
+            if self.targeted_flower.bloom_state == Bloom.OPEN:
+                self.state = BeeState.LOADING_NECTAR
+                self.collection_times.append(self.model.steps)
+
+                C = self.targeted_flower.sucrose_concentration
+                self._remaining_time_in_state = int(random.uniform(12.44 * C + 20.09, 24.22 * C + 32.07))
+                self.time_source_found = self.model.steps if self.time_source_found // STEPS_PER_DAY != self.model.current_day else self.time_source_found
+
+            else:
+                self.state = BeeState.RETURNING
+
+                if self.foraging_strategy == ForagingStrategy.PERSISTENT and self.next_reconnaissance_time is not None:
+                    self.next_reconnaissance_time = int(
+                        (self.next_reconnaissance_time + self.model.today(self.time_source_found)) / 2) if abs(
+                        self.next_reconnaissance_time - self.model.today(
+                            self.time_source_found)) > 120 + 2 * self.targeted_flower.flight_duration else self.model.steps + 120 + 2 * self.targeted_flower.flight_duration
+
+        elif self.homing_motivation > MAX_SEARCH_TIME:
+            self.state = BeeState.RETURNING
+            self.homing_motivation = 0
+
     def update_status_flying_to_search_area(self):
-        pass
+        if self.accurate_position == self._search_area_center:
+            self.state = BeeState.SEARCHING_ADVERTISED_SOURCE
+
     def update_status_loading(self):
-        pass
+        if self._remaining_time_in_state > 0:
+            self._remaining_time_in_state -= 1
+
+        else:
+            self.loaded = True
+            self.state = BeeState.RETURNING
+
     def update_status_returning(self):
-        pass
+        if self.accurate_position == self.model.dance_floor:
+            if self.loaded:
+                self.state = BeeState.UNLOADING_NECTAR
+                C = self.targeted_flower.sucrose_concentration
+                self._remaining_time_in_state = int(
+                    random.uniform(39 * (C ** 2) + 114.1 * C - 64.25, 159 * (C ** 2) - 140 * C + 166))
+
+            else:
+                self.state = BeeState.CLUSTERING
+                self.accurate_position = self.model.dance_floor
+
     def update_status_unloading(self):
-        pass
+        if self._remaining_time_in_state > 0:
+            self._remaining_time_in_state -= 1
+
+        else:
+            self.model.total_energy += NECTAR_REWARD * self.targeted_flower.sucrose_concentration
+            self.loaded = False
+            self.state = BeeState.DANCING
+            self._remaining_time_in_state = 0.1713 * self.targeted_flower.value
+
     def update_status_dancing(self):
-        pass
+        if self._remaining_time_in_state > 0:
+            self._remaining_time_in_state -= 1
+
+        else:
+            self.state = BeeState.PREPARING_TO_FLY_OUT
+            self._remaining_time_in_state = random.randint(16, 51)
+
     def update_status_preparing_to_fly_out(self):
-        pass
+        if self._remaining_time_in_state > 0:
+            self._remaining_time_in_state -= 1
+
+        else:
+            self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
 
     def update_status(self) -> None:
         """
@@ -671,132 +734,34 @@ class ForagerBeeAgent(mesa.Agent):
         if self.model.steps % STEPS_PER_DAY == 1:
             self.daily_variable_reassignment()
 
+
         if self.state == BeeState.RESTING:
-            # if anticipation time comes up the state is set to CLUSTERING
-            if self.model.steps % STEPS_PER_DAY == self.next_anticipation_time % STEPS_PER_DAY:
-                self.state = BeeState.CLUSTERING
-                self.accurate_position = self.model.dance_floor
+            self.update_status_resting()
 
-        # bee is CLUSTERING  ==> can see bees on the dance floor and can be seen by others on the dance floor
         elif self.state == BeeState.CLUSTERING:
-
-            # at sunset the bee enters resting state if she has not yet
-            if self.model.steps % STEPS_PER_DAY >= self.model.sunset % STEPS_PER_DAY:
-                self.state = BeeState.RESTING
-                self.accurate_position = self.model.hive
-
-            # after last collection time + max post collection clustering time the bee enters resting state if she has not yet
-            elif self.last_collection_time is not None and self.last_collection_time % STEPS_PER_DAY + MAX_POST_COLLECTION_CLUSTERING_TIME < self.model.steps % STEPS_PER_DAY:
-                self.state = BeeState.RESTING
-                self.accurate_position = self.model.hive
-
-            # if the bee is watching another bee that is dancing, and she is inexperienced or is targeting the same flower she will watch the waggle dance for several durations
-            elif self.currently_watched_bee is not None and (self.targeted_flower is self.currently_watched_bee.targeted_flower or self.targeted_flower is None):
-                self.state = BeeState.WATCHING_WAGGLE_DANCE
-                self.targeted_flower = self.currently_watched_bee.targeted_flower if self.targeted_flower is None else self.targeted_flower
-                self._remaining_time_in_state = int(((0.0013 * self.targeted_flower.distance_from_hive) + 1.86) * random.uniform(4.9, 12.9))
-
-            #
-            elif self.foraging_strategy == ForagingStrategy.PERSISTENT and self.next_reconnaissance_time == self.model.steps:
-                self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
-
-            elif self.foraging_strategy == ForagingStrategy.PERSISTENT and self.targeted_flower.close_time < self.model.steps:
-                if random.random() < self.late_reconnaissance_probability:
-                    self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
-
+            self.update_status_clustering()
 
         elif self.state == BeeState.WATCHING_WAGGLE_DANCE:
-            if self._remaining_time_in_state > 0:
-                self._remaining_time_in_state -= 1
-
-            else:
-                if self.days_of_experience >= 0:
-                    self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
-
-                else:
-                    self.state = BeeState.FLYING_TO_SEARCH_AREA
-                    rand_distance_from_flower = random.randint(1,MAX_SEARCH_RADIUS)
-                    self._search_area_center = Calc.generate_random_point(self.targeted_flower.location[0], self.targeted_flower.location[1], rand_distance_from_flower)
-
-
-                self.currently_watched_bee = None
-
+            self.update_status_watching_waggle_dance()
 
         elif self.state == BeeState.FLYING_STRAIGHT_TO_FLOWER or self.state == BeeState.SEARCHING_ADVERTISED_SOURCE:
-            if self.accurate_position == self.targeted_flower.location:
-                if self.targeted_flower.bloom_state == Bloom.OPEN:
-                    self.state = BeeState.LOADING_NECTAR
-                    self.collection_times.append(self.model.steps)
-
-                    C = self.targeted_flower.sucrose_concentration
-                    self._remaining_time_in_state = int(random.uniform(12.44 * C + 20.09, 24.22 * C + 32.07))
-                    self.time_source_found = self.model.steps if self.time_source_found // STEPS_PER_DAY != self.model.current_day else self.time_source_found
-
-                else:
-                    self.state = BeeState.RETURNING
-
-                    if self.foraging_strategy == ForagingStrategy.PERSISTENT and self.next_reconnaissance_time is not None:
-                        self.next_reconnaissance_time = int((self.next_reconnaissance_time + self.model.today(self.time_source_found)) / 2) if abs(self.next_reconnaissance_time - self.model.today(self.time_source_found)) > 120 + 2 * self.targeted_flower.flight_duration else self.model.steps + 120 + 2 * self.targeted_flower.flight_duration
-
-            elif self.homing_motivation > MAX_SEARCH_TIME:
-                self.state = BeeState.RETURNING
-                self.homing_motivation = 0
-
+            self.update_status_flying_to_source_or_searching()
 
         elif self.state == BeeState.FLYING_TO_SEARCH_AREA:
-            if self.accurate_position == self._search_area_center:
-                self.state = BeeState.SEARCHING_ADVERTISED_SOURCE
-
+            self.update_status_flying_to_search_area()
 
         elif self.state == BeeState.LOADING_NECTAR:
-            if self._remaining_time_in_state > 0:
-                self._remaining_time_in_state -= 1
-
-            else:
-                self.loaded = True
-                self.state = BeeState.RETURNING
-
-
-        elif self.state == BeeState.RETURNING:
-            if self.accurate_position == self.model.dance_floor:
-                if self.loaded:
-                    self.state = BeeState.UNLOADING_NECTAR
-                    C = self.targeted_flower.sucrose_concentration
-                    self._remaining_time_in_state = int(random.uniform(39 * (C ** 2) + 114.1 * C - 64.25, 159 * (C ** 2) - 140 * C + 166))
-
-                else:
-                    self.state = BeeState.CLUSTERING
-                    self.accurate_position = self.model.dance_floor
+            self.update_status_loading()
 
         elif self.state == BeeState.UNLOADING_NECTAR:
-            if self._remaining_time_in_state > 0:
-                self._remaining_time_in_state -= 1
-
-            else:
-                self.model.total_energy += NECTAR_REWARD * self.targeted_flower.sucrose_concentration
-                self.loaded = False
-                self.state = BeeState.DANCING
-                self._remaining_time_in_state = 0.1713 * self.targeted_flower.value
-
+            self.update_status_unloading()
 
         elif self.state == BeeState.DANCING:
-            if self._remaining_time_in_state > 0:
-                self._remaining_time_in_state -= 1
-
-            else:
-                self.state = BeeState.PREPARING_TO_FLY_OUT
-                self._remaining_time_in_state = random.randint(16, 51)
-
+            self.update_status_dancing()
 
         elif self.state == BeeState.PREPARING_TO_FLY_OUT:
-            if self._remaining_time_in_state > 0:
-                self._remaining_time_in_state -= 1
+            self.update_status_preparing_to_fly_out()
 
-            else:
-                self.state = BeeState.FLYING_STRAIGHT_TO_FLOWER
-
-        else:
-            self.state = self.state
 
     def step(self) -> None:
         """
@@ -1215,7 +1180,7 @@ def main(args):
     number_of_steps = 172800
     number_of_runs_per_combination = 10
 
-    csv_path = r"/home/run_out.csv"
+    csv_path = r"/home/valentin-rexer/uni/UofM/abm_files/sigmas/run_out.csv"
 
     params = []
     for n, d, c, a in itertools.product(

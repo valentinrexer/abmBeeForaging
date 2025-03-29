@@ -1,10 +1,15 @@
 import random
+from enum import Enum
 
-prob = 2.3 * 10 ** (-6)
+class Action(Enum):
+    ACTION_1 =1,
+    ACTION_2 =2,
 
-def day_of_time_step(step, steps_per_day):
-    return step // steps_per_day
+x = Action.ACTION_2
 
+match x:
+    case Action.ACTION_1:
+        print(1)
 
-
-print(222586 % 86400)
+    case Action.ACTION_2:
+        print(2)
