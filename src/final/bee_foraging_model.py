@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 import os
 import sys
@@ -22,7 +23,8 @@ import itertools
 #packages for data analysis
 import csv
 
-_LOGGER = logging.getLogger(__name__)
+mp.log_to_stderr(logging.INFO)
+_LOGGER = mp.get_logger()
 
 
 class BeeForagingModel(mesa.Model):
@@ -72,7 +74,7 @@ class BeeForagingModel(mesa.Model):
 
         # create flower (food source) and place it on the grid
         flower_location = Calc.generate_random_point(self.hive[0], self.hive[1], source_distance, 0.01)
-        flower = FlowerAgent(self, flower_location, 1000, flower_open, flower_closed, sucrose_concentration)
+        flower = FlowerAgent(self, flower_location, math.inf, flower_open, flower_closed, sucrose_concentration)
         self.agents.add(flower)
 
         # add the desired number of Bee Agents to the grid
@@ -80,7 +82,7 @@ class BeeForagingModel(mesa.Model):
         for i in range(number_of_starting_bees):
             bee_agent = ForagerBeeAgent(self, 1,
                                         (self.hive[0], self.hive[1]),
-                                        time_source_found=random.randint(flower.open_time, flower.open_time + 2 * STEPS_PER_HOUR))
+                                        time_source_found=random.randint(flower.open_time, flower.close_time))
             bee_agent.targeted_flower = flower
             bee_agent.next_anticipation_time = bee_agent.anticipation(1, self.sunrise, self.sunset)
             C = self.sucrose_concentration
@@ -811,7 +813,7 @@ class ForagerBeeAgent(mesa.Agent):
 
         else:
             self.state = BeeState.PREPARING_TO_FLY_OUT
-            self._remaining_time_in_state = random.randint(16, 51)
+            self._remaining_time_in_state = random.randint(12, 96)
 
     def update_state_preparing_to_fly_out(self):
         """
@@ -872,8 +874,6 @@ class ForagerBeeAgent(mesa.Agent):
 
         else:
             self.state = self.state
-
-
 
     def step(self) -> None:
         """
@@ -988,7 +988,7 @@ class DataCollector:
         self.model = model
         self.path_to_csv = path_to_csv
         self.collection_interval = collection_interval
-        self.columns = ['number_of_starting_foragers', 'source_distance', 'sucrose_concentration', 'anticipation_method', 'time_step', 'energy']
+        self.columns = ['number_of_starting_foragers', 'source_distance', 'sucrose_concentration', 'anticipation_method', 'flower_open', 'flower_open' , 'time_step', 'energy']
 
 
         file_is_empty = not os.path.exists(path_to_csv) or os.path.getsize(path_to_csv) == 0
@@ -1011,6 +1011,8 @@ class DataCollector:
                self.model.initial_source_distance,
                self.model.sucrose_concentration,
                self.model.anticipation_method,
+               self.model.flowers[0].open_time,
+               self.model.flowers[0].close_time,
                self.model.steps,
                self.model.total_energy]
 
@@ -1028,13 +1030,18 @@ class DataCollector:
         if self.model.steps % self.collection_interval == 0:
             self.collect_data()
 
-def run_model_instance(time_steps, **params):
-    model = BeeForagingModel(**params)
+def run_model_instance(time_steps : int, **params) -> float:
+    """
 
+    :param time_steps:
+    :param params:
+    :return:
+    """
+    model = BeeForagingModel(**params)
     model.run(time_steps)
     return model.total_energy
 
-def run_single_model_instance(args):
+def run_single_model_instance(args: tuple[int, dict[str, int | str | float | Any]]) -> float:
     """
     Wrapper function that unpacks arguments for run_model_instance
 
@@ -1046,8 +1053,10 @@ def run_single_model_instance(args):
     _LOGGER.info(f"Running model instance for parameters: {specific_params}")
     return run_model_instance(time_steps, **specific_params)
 
-
-def parallel_run(num_cores, num_runs_per_combination, time_steps, params):
+def parallel_run(num_cores: int,
+                 num_runs_per_combination: int,
+                 time_steps: int,
+                 params: list[dict[str, int | str | float | Any]]) -> list[float]:
     """
     Run parallel simulations
 
@@ -1068,38 +1077,44 @@ def parallel_run(num_cores, num_runs_per_combination, time_steps, params):
     return results
 
 def main(args):
-    number_of_starting_foragers = [10]
-    source_distance = [500]
-    sucrose_concentration = [1]
-    anticipation_method = [1]
+    number_of_starting_foragers = [10, 33, 100, 333, 1000]
+    source_distance = [33, 100, 333, 1000, 3333]
+    sucrose_concentration = [0.25, 0.5, 1.0, 2.0]
+    anticipation_method = [1, 2]
+    anthesis_interval = [(7, 9), (7, 11), (7, 15),
+                         (12, 14), (11, 15), (9, 17),
+                         (17, 19), (15, 19), (11, 19)]
 
-    number_of_steps = 172800
-    number_of_runs_per_combination = 20
+    number_of_steps = 5 * 1
+    number_of_runs_per_combination = 10
 
     csv_path = r"/home/valentin-rexer/uni/UofM/abm_files/sigmas/run_out.csv"
 
     params = []
-    for n, d, c, a in itertools.product(
+    for n, d, c, a, a_in in itertools.product(
         number_of_starting_foragers,
         source_distance,
         sucrose_concentration,
-        anticipation_method
+        anticipation_method,
+        anthesis_interval
     ):
         params.append({
             "number_of_starting_bees": n,
             "source_distance": d,
             "sucrose_concentration": c,
             "anticipation_method": a,
+            "flower_open": a_in[0],
+            "flower_closed": a_in[1],
             "collector_path" : csv_path,
             "collection_interval": STEPS_PER_DAY
         })
 
-    print(parallel_run(
+    parallel_run(
         mp.cpu_count() - 2,
         number_of_runs_per_combination,
         number_of_steps,
         params
-    ))
+    )
 
 if __name__ == "__main__":
     main(sys.argv)
