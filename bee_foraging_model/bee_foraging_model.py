@@ -18,13 +18,13 @@ import math
 
 #packages for multicore processing
 import multiprocessing as mp
-import itertools
 
 #packages for data analysis
 import csv
 
 mp.log_to_stderr(logging.INFO)
-_LOGGER = mp.get_logger()
+_mp_LOGGER = mp.get_logger()
+_LOGGER = logging.getLogger(__name__)
 
 
 class BeeForagingModel(mesa.Model):
@@ -85,9 +85,9 @@ class BeeForagingModel(mesa.Model):
                                         time_source_found=random.randint(flower.open_time, flower.close_time))
             bee_agent.targeted_flower = flower
             bee_agent.next_anticipation_time = bee_agent.anticipation(1, self.sunrise, self.sunset)
-            C = self.sucrose_concentration
+            c = self.sucrose_concentration
             bee_agent.last_collection_time = random.randint(flower.close_time - (random.randint(0,
-                                                                                                int(2 * flower.flight_duration) + int(random.uniform(39 * (C ** 2) + 114.1 * C - 64.25, 159 * (C ** 2) - 140 * C + 166)))), flower.close_time)
+                                                                                                int(2 * flower.flight_duration) + int(random.uniform(39 * (c ** 2) + 114.1 * c - 64.25, 159 * (c ** 2) - 140 * c + 166)))), flower.close_time)
             bee_agent.collection_times.append(bee_agent.last_collection_time)
             self.agents.add(bee_agent)
 
@@ -100,13 +100,18 @@ class BeeForagingModel(mesa.Model):
                              and collection_interval is not None
                           else None)
 
+        _LOGGER.info(f"Successfully created {self.__class__.__name__} instance")
+
     def run(self, steps : int) -> None:
         """
         runs the model for an arbitrary number of steps
 
         :param steps: number of steps to run
         """
-        for _ in range(steps):
+        for step in range(steps):
+            if step % 10000 == 0:
+                _LOGGER.info(f"Running step {step}!")
+
             self.step()
 
     def out_of_bounds(self, pos : tuple[float, float]) -> bool:
@@ -162,23 +167,30 @@ class BeeForagingModel(mesa.Model):
         """
         Reassigns foraging strategies to all bees based on their current experience
         """
-        self.reassign_foraging_strategies(1, 40)
-        self.reassign_foraging_strategies(2, 60)
-        self.reassign_foraging_strategies(3, 80)
-        self.reassign_foraging_strategies(4, 90)
-        self.reassign_foraging_strategies_eq_and_higher(5, 95)
+        self.reassign_foraging_strategies(1, 0.40)
+        self.reassign_foraging_strategies(2, 0.60)
+        self.reassign_foraging_strategies(3, 0.80)
+        self.reassign_foraging_strategies(4, 0.90)
+        self.reassign_foraging_strategies(5, 0.95, include_higher=True)
 
-    def reassign_foraging_strategies(self, days_of_experience : int, persistent_percentage : int | float) -> None:
+    def reassign_foraging_strategies(self, days_of_experience : int,
+                                     persistent_percentage : int | float,
+                                     include_higher : bool = False) -> None:
         """
         Reassigns foraging strategies to a group of bees with a specific number of days of experience
 
         :param days_of_experience: number of days of experience
         :param persistent_percentage: percentage of persistent foragers
+        :param include_higher: whether to include bees with experience higher than specified in days_of_experience
         """
 
-        bees = [bee for bee in self.agents if isinstance(bee, ForagerBeeAgent) and
+        bees = ([bee for bee in self.agents if isinstance(bee, ForagerBeeAgent) and
                 bee.days_of_experience == days_of_experience and
-                bee.state != BeeState.DAY_SKIPPING]
+                bee.state != BeeState.DAY_SKIPPING] if not include_higher
+
+                else [bee for bee in self.agents if isinstance(bee, ForagerBeeAgent) and
+                      bee.days_of_experience >= days_of_experience and
+                      bee.state != BeeState.DAY_SKIPPING])
 
         bee_groups = BeeForagingModel.split_agents_by_percentage(bees, persistent_percentage)
 
@@ -188,26 +200,7 @@ class BeeForagingModel(mesa.Model):
         for bee in bee_groups[1]:
             bee.foraging_strategy = ForagingStrategy.RETICENT
 
-    def reassign_foraging_strategies_eq_and_higher(self, days_of_experience : int, persistent_percentage : int | float) -> None:
-        """
-        Reassigns foraging strategies to a group of bees with a specific number of days of experience or more experience
-
-        :param days_of_experience: min number of days of experience
-        :param persistent_percentage: percentage of persistent foragers
-        """
-        bees = [bee for bee in self.agents if isinstance(bee, ForagerBeeAgent) and
-                bee.days_of_experience >= days_of_experience and
-                bee.state != BeeState.DAY_SKIPPING]
-
-        bee_groups = BeeForagingModel.split_agents_by_percentage(bees, persistent_percentage)
-
-        for bee in bee_groups[0]:
-            bee.foraging_strategy = ForagingStrategy.PERSISTENT
-
-        for bee in bee_groups[1]:
-            bee.foraging_strategy = ForagingStrategy.RETICENT
-
-    def reassign_day_skippers(self, percentage : int | float =20) -> None:
+    def reassign_day_skippers(self, percentage : int | float = 0.20) -> None:
         """
         Chooses a random sample of bee agents and sets their state to DAY_SKIPPING
 
@@ -238,7 +231,7 @@ class BeeForagingModel(mesa.Model):
             new_bee_agent.foraging_strategy = ForagingStrategy.RETICENT
             self.agents.add(new_bee_agent)
 
-    def kill_agents(self, percentage: int | float =20) -> None:
+    def kill_agents(self, percentage: int | float = 0.20) -> None:
         """
         Removes bee agents from the model
 
@@ -249,7 +242,7 @@ class BeeForagingModel(mesa.Model):
         bee_agents = [agent for agent in self.agents if isinstance(agent, ForagerBeeAgent)]
 
         # Calculate how many to kill
-        num_to_kill = int(len(bee_agents) * percentage / 100.0)
+        num_to_kill = int(len(bee_agents) * percentage)
 
         # Select which bees to kill randomly
         bees_to_kill = random.sample(bee_agents, num_to_kill)
@@ -299,9 +292,10 @@ class BeeForagingModel(mesa.Model):
 
         if not self.steps == 2 and self.steps % STEPS_PER_DAY == 2:
             self.daily_update()
+            _LOGGER.info("Successfully updated variable assignments for the next simulation day!")
 
     @staticmethod
-    def split_agents_by_percentage(agents: list, first_percentage: int | float = 30, exclude_agent=None) -> tuple[list, list]:
+    def split_agents_by_percentage(agents: list, first_percentage: int | float = 0.30, exclude_agent=None) -> tuple[list, list]:
         """
         Split a set of items (in our case agents) into two subsets randomly
 
@@ -314,8 +308,8 @@ class BeeForagingModel(mesa.Model):
         if not agents:
             return [], []
 
-        if not 1 <= first_percentage <= 100:
-            raise ValueError("First percentage must be between 1 and 100")
+        if not 0.01 <= first_percentage <= 1:
+            raise ValueError("First percentage must be between 1% and 100%")
 
         # Calculate how many agents go in the first group
         n_agents = len(agents) if exclude_agent is None else len(agents) - 1
@@ -323,7 +317,7 @@ class BeeForagingModel(mesa.Model):
             return [], []
 
         # if the first group of the split does not contain an item the number is increased so at least one bee is seen
-        num_in_first = int(n_agents * (first_percentage / 100))
+        num_in_first = int(n_agents * first_percentage)
         if num_in_first == 0:
             num_in_first = 1
 
@@ -363,7 +357,7 @@ class FlowerAgent(mesa.Agent):
                  close_time : int,
                  sucrose_concentration : float,
                  visibility_radius : float = 1.0,
-                 bloom_state : Bloom =Bloom.CLOSED,
+                 bloom_state : Bloom = Bloom.CLOSED,
                  color : Color =random.choice(list(Color))) -> None:
         """
         Initializes a FlowerAgent object
@@ -903,7 +897,7 @@ class ForagerBeeAgent(mesa.Agent):
             self.model.total_energy -= RESTING_ENERGY_COST
 
             # get random sample from all bees currently on the dance_floor
-            seen_bees = BeeForagingModel.split_agents_by_percentage(self.model.get_bees_on_dance_floor(), 4, self)[0]
+            seen_bees = BeeForagingModel.split_agents_by_percentage(self.model.get_bees_on_dance_floor(), 0.04, self)[0]
 
             for bee in seen_bees:
                 if not bee.state == BeeState.DANCING:
@@ -1050,7 +1044,7 @@ def run_single_model_instance(args: tuple[int, dict[str, int | str | float | Any
     """
 
     time_steps, specific_params = args
-    _LOGGER.info(f"Running model instance for parameters: {specific_params}")
+    _mp_LOGGER.info(f"Running model instance for parameters: {specific_params}")
     return run_model_instance(time_steps, **specific_params)
 
 def parallel_run(num_cores: int,
@@ -1075,46 +1069,3 @@ def parallel_run(num_cores: int,
         results = pool.map(run_single_model_instance, expanded_params)
 
     return results
-
-def main(args):
-    number_of_starting_foragers = [10, 33, 100, 333, 1000]
-    source_distance = [33, 100, 333, 1000, 3333]
-    sucrose_concentration = [0.25, 0.5, 1.0, 2.0]
-    anticipation_method = [1, 2]
-    anthesis_interval = [(7, 9), (7, 11), (7, 15),
-                         (12, 14), (11, 15), (9, 17),
-                         (17, 19), (15, 19), (11, 19)]
-
-    number_of_steps = 5 * 1
-    number_of_runs_per_combination = 10
-
-    csv_path = r"/home/valentin-rexer/uni/UofM/abm_files/sigmas/run_out.csv"
-
-    params = []
-    for n, d, c, a, a_in in itertools.product(
-        number_of_starting_foragers,
-        source_distance,
-        sucrose_concentration,
-        anticipation_method,
-        anthesis_interval
-    ):
-        params.append({
-            "number_of_starting_bees": n,
-            "source_distance": d,
-            "sucrose_concentration": c,
-            "anticipation_method": a,
-            "flower_open": a_in[0],
-            "flower_closed": a_in[1],
-            "collector_path" : csv_path,
-            "collection_interval": STEPS_PER_DAY
-        })
-
-    parallel_run(
-        mp.cpu_count() - 2,
-        number_of_runs_per_combination,
-        number_of_steps,
-        params
-    )
-
-if __name__ == "__main__":
-    main(sys.argv)

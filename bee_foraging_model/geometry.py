@@ -40,10 +40,13 @@ class Calc:
             if x >= 0 and y >= 0:
                 return round(x, 5), round(y, 5)
 
+        return None
+
     @staticmethod
     def get_next_point(current_x : int | float,
                        current_y : int | float,
-                       angle : float, distance : float) -> tuple[float, float] | None:
+                       angle : float,
+                       distance : float) -> tuple[float, float] | None:
         """
             Returns the next point given a start point, direction(angle) and distance
 
