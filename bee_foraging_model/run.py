@@ -23,7 +23,14 @@ class DataCollector:
         self.model = model
         self.path_to_csv = path_to_csv
         self.collection_interval = collection_interval
-        self.columns = ['number_of_starting_foragers', 'source_distance', 'sucrose_concentration', 'anticipation_method', 'flower_open', 'flower_open' , 'time_step', 'energy']
+        self.columns = ['number_of_starting_foragers',
+                        'source_distance',
+                        'sucrose_concentration',
+                        'anticipation_method',
+                        'flower_open',
+                        'flower_open' ,
+                        'time_step',
+                        'energy']
 
 
         file_is_empty = not os.path.exists(path_to_csv) or os.path.getsize(path_to_csv) == 0

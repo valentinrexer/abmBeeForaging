@@ -3,12 +3,11 @@ from __future__ import annotations
 import logging
 from functools import cached_property
 
-#packages for feature implementation
 import mesa
-
 from custom_enum import *
 from geometry import *
 from const import *
+from run import DataCollector
 
 import random
 import math
