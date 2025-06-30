@@ -1,5 +1,7 @@
 from bee_foraging_model.bee_foraging_model import *
-import itertools
+from bee_foraging_model.run import *
+import sys
+from itertools import product
 
 def main(args):
     csv_path = args[1]
@@ -25,7 +27,7 @@ def main(args):
     number_of_runs_per_combination = 10
 
     params = []
-    for n, d, c, a, a_in in itertools.product(
+    for n, d, c, a, a_in in product(
         number_of_starting_foragers,
         source_distance,
         sucrose_concentration,
