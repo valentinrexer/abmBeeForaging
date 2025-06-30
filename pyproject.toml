@@ -5,5 +5,5 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "mesa>=3.2.0",
+    "mesa==3.0.0",
 ]

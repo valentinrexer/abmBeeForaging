@@ -1,7 +1,7 @@
-from bee_foraging_model.bee_foraging_model import *
 from bee_foraging_model.run import *
 import sys
 from itertools import product
+from bee_foraging_model.const import STEPS_PER_HOUR, STEPS_PER_DAY
 
 def main(args):
     csv_path = args[1]
@@ -23,7 +23,12 @@ def main(args):
                          (12, 14), (11, 15), (9, 17),
                          (17, 19), (15, 19), (11, 19)]
 
-    number_of_steps = 5 * 1 # will be replaced by 5 * STEPS_PER_DAY
+    for i in range(len(anthesis_interval)):
+        curr_interval = anthesis_interval[i]
+        anthesis_interval[i] = (curr_interval[0] * STEPS_PER_HOUR,
+                                curr_interval[1] * STEPS_PER_HOUR)
+
+    number_of_steps = 5 * STEPS_PER_DAY # will be replaced by 5 * STEPS_PER_DAY
     number_of_runs_per_combination = 10
 
     params = []

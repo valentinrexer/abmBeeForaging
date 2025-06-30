@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 from functools import cached_property
+import os
+import csv
 
 import mesa
-from custom_enum import *
-from geometry import *
-from const import *
-from run import DataCollector
+
+from .custom_enum import *
+from .geometry import *
+from .const import *
 
 import random
 import math
@@ -73,14 +75,20 @@ class BeeForagingModel(mesa.Model):
             bee_agent.targeted_flower = flower
             bee_agent.next_anticipation_time = bee_agent.anticipation(1, self.sunrise, self.sunset)
             c = self.sucrose_concentration
-            bee_agent.last_collection_time = random.randint(flower.close_time - (random.randint(0,
-                                                                                                int(2 * flower.flight_duration) + int(random.uniform(39 * (c ** 2) + 114.1 * c - 64.25, 159 * (c ** 2) - 140 * c + 166)))), flower.close_time)
+
+            # calculate the earliest possible time that the bee collects food at the flower -> returns -> unloads
+            # -> then returns to the flower and finds it closed
+            random_last_flight_time = (flower.close_time
+                                           - (random.randint(0, int(2 * flower.flight_duration) +
+                                                             int(81 * (c**2) - 193.9 * c + 165.8))))
+
+            # assign a random time inbetween the earliest possible latest food collection time and the closing time
+            bee_agent.last_collection_time = random.randint(random_last_flight_time, flower.close_time)
             bee_agent.collection_times.append(bee_agent.last_collection_time)
             self.agents.add(bee_agent)
 
         # assign foraging strategies to the newly created foragers (PERSISTENT/RETICENT)
         self.update_bee_foraging_strategies()
-
 
         self.collector = (DataCollector(self, collector_path, collection_interval)
                           if collector_path is not None
@@ -97,7 +105,7 @@ class BeeForagingModel(mesa.Model):
         """
         for step in range(steps):
             if step % 10000 == 0:
-                _LOGGER.info(f"Running step {step}!")
+                _LOGGER.warning(f"Running step {step}, {self.total_energy} C!")
 
             self.step()
 
@@ -400,9 +408,9 @@ class FlowerAgent(mesa.Agent):
         :return: value of the source as floating point number
         """
 
-        C = self.sucrose_concentration
-        D = self.distance_from_hive
-        return (353.6 * C - 0.015 * D - 2.64) / (0.2 * C + 0.015 * D + 2.64)
+        c = self.sucrose_concentration
+        d = self.distance_from_hive
+        return (353.6 * c - 0.015 * d - 2.64) / (0.2 * c + 0.015 * d + 2.64)
 
     def step(self) -> None:
         """
@@ -459,7 +467,7 @@ class ForagerBeeAgent(mesa.Agent):
         self.next_reconnaissance_time = None   # determines the next reconnaissance time step for PERSISTENT foragers
         self.loaded = False   # bee has currently food loaded
         self.collection_times = []   # list of time steps when the bee collected food
-        self._mortality_probability = MORTALITY_RATE
+        self._mortality_probability = MORTALITY_PROBABILITY
         self.targeted_flower = None  # flower object the bee is targeting at the moment
         self._last_angle = 0.0   # last direction of movement of the bee
         self._search_area_center = None   # point at which the bee begins her search for the source / center of the search radius
@@ -521,8 +529,14 @@ class ForagerBeeAgent(mesa.Agent):
 
         # if the bee didn't find the flower during the last step its flying direction is deviated
         else:
-            angle = Calc.random_deviate_angle(self._last_angle, MEAN, STANDARD_DEVIATION, SEARCHING_ANGLE_RANGE[0], SEARCHING_ANGLE_RANGE[1])
-            self.move_bee_with_angle(angle, SEARCHING_SPEED)
+            angle = Calc.random_deviate_angle(current_angle=self._last_angle,
+                                              mean=DEFAULT_MEAN,
+                                              standard_deviation=DEFAULT_STANDARD_DEVIATION,
+                                              min_value=SEARCHING_ANGLE_RANGE[0],
+                                              max_value=SEARCHING_ANGLE_RANGE[1])
+
+            self.move_bee_with_angle(angle=angle,
+                                     speed=SEARCHING_SPEED)
 
         self.homing_motivation += 1
 
@@ -539,7 +553,8 @@ class ForagerBeeAgent(mesa.Agent):
             raise TypeError("bee_model must be of type BeeForagingModel")
 
         if self.model.out_of_bounds(destination):
-            raise ValueError("Destination out of bounds")
+            _LOGGER.error(f"Destination {destination} is out of bounds for bee agent {self.unique_id} at position {self.accurate_position}! Agent is not performing the movement!")
+            return
 
         angle = Calc.get_angle(self.accurate_position, destination)
         current_distance = Calc.get_distance(self.accurate_position, destination)
@@ -549,11 +564,7 @@ class ForagerBeeAgent(mesa.Agent):
             self._last_angle = angle
 
         else:
-            new_pos = (self.accurate_position[0] + speed * math.cos(angle),
-                       self.accurate_position[1] + speed * math.sin(angle))
-            if not self.model.out_of_bounds(new_pos):
-                self.accurate_position = new_pos
-                self._last_angle = angle
+            self.move_to_new_pos_with_angle(angle=angle, speed=speed)
 
     def move_bee_with_angle(self, angle : float, speed : float) -> None:
         """
@@ -571,9 +582,11 @@ class ForagerBeeAgent(mesa.Agent):
         if not 0 <= angle <= math.pi * 2:
             raise ValueError("Angle out of range")
 
+        self.move_to_new_pos_with_angle(angle=angle, speed=speed)
+
+    def move_to_new_pos_with_angle(self, angle: float, speed : float) -> None:
         new_pos = (self.accurate_position[0] + speed * math.cos(angle),
                    self.accurate_position[1] + speed * math.sin(angle))
-
         if not self.model.out_of_bounds(new_pos):
             self.accurate_position = new_pos
             self._last_angle = angle
@@ -663,7 +676,8 @@ class ForagerBeeAgent(mesa.Agent):
             self.accurate_position = self.model.hive
 
         # after last collection time + max post collection clustering time the bee enters resting state if she has not yet
-        elif self.last_collection_time is not None and self.last_collection_time % STEPS_PER_DAY + MAX_POST_COLLECTION_CLUSTERING_TIME < self.model.steps % STEPS_PER_DAY:
+        elif (self.last_collection_time is not None and
+              self.last_collection_time % STEPS_PER_DAY + MAX_DURATION_UNTIL_CLUSTERING_TIME_AFTER_LAST_COLLECTION < self.model.steps % STEPS_PER_DAY):
             self.state = BeeState.RESTING
             self.accurate_position = self.model.hive
 
@@ -715,11 +729,12 @@ class ForagerBeeAgent(mesa.Agent):
                 self.state = BeeState.LOADING_NECTAR
                 self.collection_times.append(self.model.steps)
 
-                C = self.targeted_flower.sucrose_concentration
-                self._remaining_time_in_state = int(random.uniform(12.44 * C + 20.09, 24.22 * C + 32.07))
+                c = self.targeted_flower.sucrose_concentration
+                self._remaining_time_in_state = int(random.uniform(12.44 * c + 20.09, 24.22 * c + 32.07))
 
                 # if the forager finds the flower open for the first time on the current day it updates its time_source_found variable
-                self.time_source_found = self.model.steps if self.time_source_found // STEPS_PER_DAY != self.model.current_day else self.time_source_found
+                self.time_source_found = self.model.steps \
+                    if self.time_source_found // STEPS_PER_DAY != self.model.current_day else self.time_source_found
 
             # if the source is still or already closed the forager returns to the hive
             else:
@@ -764,9 +779,11 @@ class ForagerBeeAgent(mesa.Agent):
         if self.accurate_position == self.model.dance_floor:
             if self.loaded:
                 self.state = BeeState.UNLOADING_NECTAR
-                C = self.targeted_flower.sucrose_concentration
+                c = self.targeted_flower.sucrose_concentration
                 self._remaining_time_in_state = int(
-                    random.uniform(39 * (C ** 2) + 114.1 * C - 64.25, 159 * (C ** 2) - 140 * C + 166))
+                    random.uniform(max(0, -39 * (c **2) + 114.1 * c - 64.3),
+                                   81 * (c**2) - 193.9 * c + 165.8)
+                )
 
             else:
                 self.state = BeeState.CLUSTERING
@@ -955,3 +972,66 @@ class ForagerBeeAgent(mesa.Agent):
             f"Homing motivation: {self.homing_motivation}"
         )
 
+class DataCollector:
+    """
+    Collects data from a BeeForagingModel instance in specified intervals
+    """
+    def __init__(self, model : BeeForagingModel, path_to_csv :str, collection_interval : int) -> None:
+
+        if not isinstance(model, BeeForagingModel):
+            raise TypeError("BeeForagingModel must be a BeeForagingModel")
+
+        if not os.path.exists(path_to_csv):
+            raise AttributeError(f"File {path_to_csv} does not exist")
+
+        self.model = model
+        self.path_to_csv = path_to_csv
+        self.collection_interval = collection_interval
+        self.columns = ['number_of_starting_foragers',
+                        'source_distance',
+                        'sucrose_concentration',
+                        'anticipation_method',
+                        'flower_open',
+                        'flower_open' ,
+                        'time_step',
+                        'energy']
+
+
+        file_is_empty = not os.path.exists(path_to_csv) or os.path.getsize(path_to_csv) == 0
+        if file_is_empty:
+            self.make_header()
+
+    def make_header(self) -> None:
+        """
+        Creates a header for the csv file
+        """
+        with open (self.path_to_csv, "a") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(self.columns)
+
+    def collect_data(self) -> None:
+        """
+        Collects data of all columns specified in self.columns
+        """
+        row = [self.model.number_of_starting_bees,
+               self.model.initial_source_distance,
+               self.model.sucrose_concentration,
+               self.model.anticipation_method,
+               self.model.flowers[0].open_time,
+               self.model.flowers[0].close_time,
+               self.model.steps,
+               self.model.total_energy]
+
+        with open (self.path_to_csv, "a") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(row)
+
+    def check_for_collection_call(self) -> None:
+        """
+        Checks if the model has reached a collection time
+        """
+        if self.model.steps == 0:
+            return
+
+        if self.model.steps % self.collection_interval == 0:
+            self.collect_data()

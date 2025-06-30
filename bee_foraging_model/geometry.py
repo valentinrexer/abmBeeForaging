@@ -12,8 +12,8 @@ class Calc:
     def generate_random_point(origin_x : int | float,
                               origin_y: int | float,
                               target_distance : int | float,
-                              tolerance: float =0.01,
-                              max_attempts : int=10000) -> tuple[float, float] | None:
+                              tolerance: float = 0.01,
+                              max_attempts : int = 10000) -> tuple[float, float] | None:
         """
         Generate a random point on the grid with a given distance to a given point (the hive in our model)
 
@@ -25,7 +25,7 @@ class Calc:
         :return: a random point with approximately the given distance to the origin point
         """
         for _ in range(max_attempts):
-            angle = random.uniform(0, 2* math.pi)
+            angle = random.uniform(0, 2 * math.pi)
 
             # Add some randomness to the distance within the tolerance range
             min_distance = target_distance * (1 - tolerance)
