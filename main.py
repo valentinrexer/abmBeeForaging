@@ -28,7 +28,7 @@ def main(args):
         anthesis_interval[i] = (curr_interval[0] * STEPS_PER_HOUR,
                                 curr_interval[1] * STEPS_PER_HOUR)
 
-    number_of_steps = 5 * STEPS_PER_DAY # will be replaced by 5 * STEPS_PER_DAY
+    number_of_steps = 5 * STEPS_PER_DAY + 1
     number_of_runs_per_combination = 10
 
     params = []

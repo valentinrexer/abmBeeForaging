@@ -14,7 +14,16 @@ from .const import *
 import random
 import math
 
+import uuid
+
 _LOGGER = logging.getLogger(__name__)
+_LOGGER.setLevel(logging.INFO)
+
+if not _LOGGER.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    _LOGGER.addHandler(handler)
 
 class BeeForagingModel(mesa.Model):
     """
@@ -97,6 +106,8 @@ class BeeForagingModel(mesa.Model):
 
         _LOGGER.info(f"Successfully created {self.__class__.__name__} instance")
 
+        self.id = uuid.uuid4()
+
     def run(self, steps : int) -> None:
         """
         runs the model for an arbitrary number of steps
@@ -104,10 +115,12 @@ class BeeForagingModel(mesa.Model):
         :param steps: number of steps to run
         """
         for step in range(steps):
-            if step % 10000 == 0:
-                _LOGGER.warning(f"Running step {step}, {self.total_energy} C!")
+            if step % STEPS_PER_DAY == 0:
+                _LOGGER.info(f"Reached step {step} for model instance {self.id}!")
 
             self.step()
+
+        _LOGGER.info(f"Finished execution of run method (steps: {steps}) for model instance {self.id}!")
 
     def out_of_bounds(self, pos : tuple[float, float]) -> bool:
         """
@@ -287,7 +300,6 @@ class BeeForagingModel(mesa.Model):
 
         if not self.steps == 2 and self.steps % STEPS_PER_DAY == 2:
             self.daily_update()
-            _LOGGER.info("Successfully updated variable assignments for the next simulation day!")
 
     @staticmethod
     def split_agents_by_percentage(agents: list, first_percentage: int | float = 0.30, exclude_agent=None) -> tuple[list, list]:
@@ -976,6 +988,8 @@ class DataCollector:
     """
     Collects data from a BeeForagingModel instance in specified intervals
     """
+    collector_instances : int = 0
+
     def __init__(self, model : BeeForagingModel, path_to_csv :str, collection_interval : int) -> None:
 
         if not isinstance(model, BeeForagingModel):
@@ -994,12 +1008,16 @@ class DataCollector:
                         'flower_open',
                         'flower_open' ,
                         'time_step',
-                        'energy']
+                        'energy',
+                        'instance_id']
 
 
         file_is_empty = not os.path.exists(path_to_csv) or os.path.getsize(path_to_csv) == 0
         if file_is_empty:
             self.make_header()
+
+        DataCollector.collector_instances += 1
+        self.id = DataCollector.collector_instances
 
     def make_header(self) -> None:
         """
@@ -1020,7 +1038,8 @@ class DataCollector:
                self.model.flowers[0].open_time,
                self.model.flowers[0].close_time,
                self.model.steps,
-               self.model.total_energy]
+               self.model.total_energy,
+               self.model.id]
 
         with open (self.path_to_csv, "a") as csv_file:
             writer = csv.writer(csv_file)
