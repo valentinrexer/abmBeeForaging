@@ -2,6 +2,10 @@ from bee_foraging_model.run import *
 import sys
 from itertools import product
 from bee_foraging_model.const import STEPS_PER_HOUR, STEPS_PER_DAY
+import logging
+from datetime import datetime
+
+_MAIN_LOGGER = logging.getLogger(__name__)
 
 def main(args):
     csv_path = args[1]
@@ -56,6 +60,8 @@ def main(args):
         number_of_steps,
         params
     )
+
+    _MAIN_LOGGER.critical(f"Finished all simulations! Timestamp: {datetime.now()}")
 
 if __name__ == "__main__":
     main(sys.argv)
