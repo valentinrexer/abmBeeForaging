@@ -4,28 +4,27 @@ from itertools import product
 from bee_foraging_model.const import STEPS_PER_HOUR, STEPS_PER_DAY
 import logging
 from datetime import datetime
+import argparse
+import json
 
 _MAIN_LOGGER = logging.getLogger(__name__)
 
-def main(args):
-    csv_path = args[1]
+def main():
+    parser = argparse.ArgumentParser(description='Parser for csv-file and JSON with foraging model parameters')
+    parser.add_argument('--csv', type=str)
+    parser.add_argument('--json', type=str)
 
-    # Number of starting foragers
-    number_of_starting_foragers = [10, 33, 100, 333, 1000]
+    args = parser.parse_args()
 
-    # Source distance from the hive
-    source_distance = [33, 100, 333, 1000, 3333]
+    params: dict
+    with open(args.json) as json_file:
+        params = json.load(json_file)
 
-    # sucrose concentration
-    sucrose_concentration = [0.25, 0.5, 1.0, 2.0]
-
-    # anticipation strategy
-    anticipation_method = [1, 2]
-
-    # anthesis time interval
-    anthesis_interval = [(7, 9), (7, 11), (7, 15),
-                         (12, 14), (11, 15), (9, 17),
-                         (17, 19), (15, 19), (11, 19)]
+    number_of_starting_foragers = params['number_of_starting_foragers']
+    source_distance = params['source_distance']
+    sucrose_concentration = params['sucrose_concentration']
+    anticipation_method = params['anticipation_method']
+    anthesis_interval = params['anthesis_interval']
 
     for i in range(len(anthesis_interval)):
         curr_interval = anthesis_interval[i]
@@ -50,7 +49,7 @@ def main(args):
             "anticipation_method": a,
             "flower_open": a_in[0],
             "flower_closed": a_in[1],
-            "collector_path" : csv_path,
+            "collector_path" : args.csv,
             "collection_interval": STEPS_PER_DAY
         })
 
@@ -64,4 +63,4 @@ def main(args):
     _MAIN_LOGGER.critical(f"Finished all simulations! Timestamp: {datetime.now()}")
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main()
