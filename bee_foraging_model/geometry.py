@@ -1,3 +1,5 @@
+""" Contains all methods for algebraic calculations used in the simulation """
+
 from __future__ import annotations
 
 import math

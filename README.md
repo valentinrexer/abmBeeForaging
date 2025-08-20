@@ -1,2 +1,9 @@
-# Agent Based Model for Analysis of Energetical Advantages 
+# Agent Based Model for Analysis of Energetically optimal Foraging Strategies for Honey Bees
+
+# Paper
+doi: ...
+
+# Installation
+
+# Usage
 

@@ -1,3 +1,5 @@
+""" implements all classes and methods to model agents and the simulation environment """
+
 from __future__ import annotations
 
 import logging
@@ -1006,7 +1008,7 @@ class DataCollector:
                         'sucrose_concentration',
                         'anticipation_method',
                         'flower_open',
-                        'flower_open' ,
+                        'flower_close' ,
                         'time_step',
                         'energy',
                         'instance_id']

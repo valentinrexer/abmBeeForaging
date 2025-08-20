@@ -1,6 +1,6 @@
 from enum import Enum
 
-#flower colors
+# flower colors
 class Color(Enum):
     RED = 1,
     GREEN = 2,
@@ -9,12 +9,12 @@ class Color(Enum):
     YELLOW = 5,
     WHITE = 6,
 
-#flower closed
+# state of the bloom to simulate availability of nectar
 class Bloom(Enum):
     OPEN = True,
     CLOSED = False
 
-#bee status
+# state a ForagerBeeAgent is currently in
 class BeeState(Enum):
     RESTING = 1,
     CLUSTERING = 2,

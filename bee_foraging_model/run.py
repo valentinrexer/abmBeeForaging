@@ -1,3 +1,8 @@
+"""
+    contains methods to run simulations with different parameters.
+    Implements support for processing on multiple cores.
+"""
+
 from typing import Any
 import logging
 import multiprocessing as mp
