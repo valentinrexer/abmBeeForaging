@@ -34,7 +34,7 @@ def main():
     number_of_steps = 5 * STEPS_PER_DAY + 1
     number_of_runs_per_combination = 10
 
-    params = []
+    param_pool = []
     for n, d, c, a, a_in in product(
         number_of_starting_foragers,
         source_distance,
@@ -42,7 +42,7 @@ def main():
         anticipation_method,
         anthesis_interval
     ):
-        params.append({
+        param_pool.append({
             "number_of_starting_bees": n,
             "source_distance": d,
             "sucrose_concentration": c,
@@ -57,7 +57,7 @@ def main():
         mp.cpu_count() - 2,
         number_of_runs_per_combination,
         number_of_steps,
-        params
+        param_pool
     )
 
     _MAIN_LOGGER.critical(f"Finished all simulations! Timestamp: {datetime.now()}")

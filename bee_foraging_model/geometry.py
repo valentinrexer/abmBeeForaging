@@ -60,14 +60,14 @@ class Calc:
         """
         x_next = current_x + distance * math.cos(angle)
         y_next = current_y + distance * math.sin(angle)
-        return round(x_next, 2), round(y_next, 2)
+        return round(x_next, 5), round(y_next, 5)
 
     @staticmethod
     def get_distance(pos1 : tuple[float, float], pos2 : tuple[float, float]) -> float:
         """
             Use euclidian distance to calculate the distance between two points
         """
-        return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 2)
+        return round(math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2), 5)
 
     @staticmethod
     def get_angle(starting_point: tuple[float, float], destination_point : tuple[float, float]) -> float:

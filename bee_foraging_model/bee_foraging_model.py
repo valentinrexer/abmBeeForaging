@@ -68,9 +68,10 @@ class BeeForagingModel(mesa.Model):
         self.total_energy = 0   # this is the final output for our model
 
         # create a simulated grid
-        self.size = (source_distance + 70) * 2
+        self.size = (source_distance + MAX_SEARCH_RADIUS + FLYING_SPEED + 1) * 2
         self.hive = (self.size // 2, self.size // 2)
         self.dance_floor = (self.hive[0] + 1, self.hive[1])
+        self.bees_on_dance_floor = []
 
         # create flower (food source) and place it on the grid
         flower_location = Calc.generate_random_point(self.hive[0], self.hive[1], source_distance, 0.01)
@@ -134,7 +135,8 @@ class BeeForagingModel(mesa.Model):
         x, y = pos
         return x < 0 or x >= self.size or y < 0 or y >= self.size
 
-    def get_bees(self) -> list:
+    @property
+    def bee_agents(self) -> list:
         """
         Returns all bee agents of the model
 
@@ -148,10 +150,10 @@ class BeeForagingModel(mesa.Model):
 
         :return: list of bee agents
         """
-        return [bee for bee in self.get_bees() if bee.accurate_position == self.dance_floor]
+        return [bee for bee in self.bee_agents if bee.accurate_position == self.dance_floor]
 
     @cached_property
-    def flowers(self) -> list:
+    def flower_agents(self) -> list:
         """
         Returns all flower agents of the model
 
@@ -224,7 +226,7 @@ class BeeForagingModel(mesa.Model):
 
             bee.state = BeeState.RESTING if bee.state == BeeState.DAY_SKIPPING else bee.state
 
-        bee_groups = BeeForagingModel.split_agents_by_percentage(self.get_bees(), percentage)
+        bee_groups = BeeForagingModel.split_agents_by_percentage(self.bee_agents, percentage)
         for bee in bee_groups[0]:
             bee.state = BeeState.DAY_SKIPPING
 
@@ -240,6 +242,8 @@ class BeeForagingModel(mesa.Model):
             new_bee_agent.next_anticipation_time = self.sunrise + self.current_day * STEPS_PER_DAY
             new_bee_agent.foraging_strategy = ForagingStrategy.RETICENT
             self.agents.add(new_bee_agent)
+
+        _LOGGER.info("Added %d to model. Simulation now runs with %d forager bee agents for instance %s", number_of_new_foragers, len(self.bee_agents), self.id)
 
     def kill_agents(self, percentage: int | float = 0.20) -> None:
         """
@@ -291,6 +295,7 @@ class BeeForagingModel(mesa.Model):
         """
 
         self.agents.do("step")
+        self.bees_on_dance_floor = [bee for bee in self.agents if isinstance(bee, ForagerBeeAgent)]
 
         if self.collector is not None:
             self.collector.check_for_collection_call()
@@ -528,9 +533,13 @@ class ForagerBeeAgent(mesa.Agent):
         """
         self._search_area_center = search_area_center
 
+        if self.current_distance_to_border <= MIN_BORDER_DISTANCE:
+            angle_towards_center = Calc.get_angle(self.accurate_position, self.model.hive)
+            self.move_bee_with_angle(angle_towards_center, SEARCHING_SPEED)
+
         # if bee agent is within the visibility radius of the flower or crossed the radius with its last move
         # the bee is moved to the flower location
-        if (Calc.get_distance(self.accurate_position, flower.location) <= flower.visibility_radius or
+        elif (Calc.get_distance(self.accurate_position, flower.location) <= flower.visibility_radius or
                 self.last_move_crossed_flower_radius(self._last_angle, SEARCHING_SPEED, flower)):
             self.move_bee_towards_point(flower.location, SEARCHING_SPEED)
 
@@ -628,6 +637,14 @@ class ForagerBeeAgent(mesa.Agent):
                                           (curr_x, curr_y),
                                           flower.location,
                                           flower.visibility_radius)
+
+    @property
+    def current_distance_to_border(self) -> float:
+        """Returns the current distance to the border"""
+        distance_to_x_borders = min(self.accurate_position[0], self.model.size - self.accurate_position[0])
+        distance_to_y_borders = min(self.accurate_position[1], self.model.size - self.accurate_position[1])
+
+        return min(distance_to_x_borders, distance_to_y_borders)
 
     @property
     def late_reconnaissance_probability(self) -> float:
@@ -915,7 +932,7 @@ class ForagerBeeAgent(mesa.Agent):
             self.model.total_energy -= RESTING_ENERGY_COST
 
             # get random sample from all bees currently on the dance_floor
-            seen_bees = BeeForagingModel.split_agents_by_percentage(self.model.get_bees_on_dance_floor(), 0.04, self)[0]
+            seen_bees = BeeForagingModel.split_agents_by_percentage(self.model.bees_on_dance_floor, 0.04, self)[0]
 
             for bee in seen_bees:
                 if not bee.state == BeeState.DANCING:
@@ -1011,6 +1028,7 @@ class DataCollector:
                         'flower_close' ,
                         'time_step',
                         'energy',
+                        'number_of_forager_agents',
                         'instance_id']
 
 
@@ -1037,10 +1055,11 @@ class DataCollector:
                self.model.initial_source_distance,
                self.model.sucrose_concentration,
                self.model.anticipation_method,
-               self.model.flowers[0].open_time,
-               self.model.flowers[0].close_time,
+               self.model.flower_agents[0].open_time,
+               self.model.flower_agents[0].close_time,
                self.model.steps,
                self.model.total_energy,
+               len(self.model.bee_agents),
                self.model.id]
 
         with open (self.path_to_csv, "a") as csv_file:
